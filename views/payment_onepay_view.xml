@@ -1,0 +1,26 @@
+<odoo>
+    <record id="payment_provider_form_onepay" model="ir.ui.view">
+
+        <field name="name">OnePay Provider Form</field>
+        <field name="model">payment.provider</field>
+        <field name="inherit_id" ref="payment.payment_provider_form" />
+        <field name="arch" type="xml">
+            <group name="provider_credentials" position="inside">
+                <group invisible="code != 'onepay'" name="onepay_credentials">
+                    <field name="onepay_merchant_id" 
+                        string="Merchant ID (onepay_merchant_id)" 
+                        required="code == 'onepay'   and state != 'disabled'" 
+                        password="True"/>
+                    <field name="onepay_access_code" 
+                        string="Access Code (onepay_access_code)" 
+                        required="code == 'onepay' and state != 'disabled'" 
+                        password="True"/>
+                    <field name="onepay_secret_key" 
+                        string="Secret Key (onepay_secret_key)" 
+                        required="code == 'onepay' and state != 'disabled'" 
+                        password="True" />
+                </group>
+            </group>
+        </field>
+    </record>
+</odoo>
