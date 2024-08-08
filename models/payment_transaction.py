@@ -39,13 +39,14 @@ class PaymentTransaction(models.Model):
             "vpc_AccessCode": self.provider_id.onepay_access_code,
             "vpc_Merchant": self.provider_id.onepay_merchant_id,
             "vpc_Amount": int_amount * 100,
-            "vpc_CreateDate": datetime.now(pytz.timezone("Etc/GMT-7")).strftime(
-                "%Y%m%d%H%M%S"
-            ),
             "vpc_Currency": "VND",
             "vpc_ReturnURL": urls.url_join(base_url, OnePayController._return_url),
             "vpc_OrderInfo": f"Order: {self.reference}",
             "vpc_MerchTxnRef": self.reference,
+            "vpc_Locale": "en",
+            "vpc_TicketNo": "192.168.166.149",
+            "AgainLink": "http://localhost:8069/shop/payment",
+            "Title": "Trip Payment"
         }
 
         payment_link_data = self.provider_id._get_payment_url(
