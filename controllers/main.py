@@ -179,9 +179,9 @@ class OnePayController(http.Controller):
             raise Forbidden()
 
     @staticmethod
-    def __hmacsha512(key, data):
-        """Generate a HMAC SHA512 hash"""
+    def hmac_sha256(key, data):
+        """Generate a HMAC SHA256 hash"""
 
         byte_key = key.encode("utf-8")
         byte_data = data.encode("utf-8")
-        return hmac.new(byte_key, byte_data, hashlib.sha512).hexdigest()
+        return hmac.new(byte_key, byte_data, hashlib.sha256).hexdigest()
