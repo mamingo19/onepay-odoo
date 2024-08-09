@@ -72,17 +72,17 @@ class PaymentProviderOnePay(models.Model):
                 seq = 1
                 queryString = key + "=" + urllib.parse.quote_plus(str(val))
 
-        hashValue = self.__hmacsha512(secret_key, queryString)
+        hashValue = self.hmac_sha256(secret_key, queryString)
     # The final URL will be like this:
         return base_url + queryString + "&vpc_SecureHash=" + hashValue
 
     @staticmethod
-    def __hmacsha512(key, data):
-        """Generate a HMAC SHA512 hash"""
+    def hmac_sha256(key, data):
+        """Generate a HMAC SHA256 hash"""
 
         byteKey = key.encode("utf-8")
         byteData = data.encode("utf-8")
-        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
+        return hmac.new(byteKey, byteData, hashlib.sha256).hexdigest()
 
     def _get_default_payment_method_codes(self):
         """Override of `payment` to return the default payment method codes."""
@@ -91,4 +91,3 @@ class PaymentProviderOnePay(models.Model):
         if self.code != "vnpay":
             return default_codes
         return const.DEFAULT_PAYMENT_METHODS_CODES
-
