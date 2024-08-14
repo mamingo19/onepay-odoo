@@ -1,14 +1,9 @@
 import logging
-import pprint
-
 import requests
 import hmac
 import hashlib
-from werkzeug.utils import redirect
 import urllib.parse
-
 from odoo import _, api, fields, models
-from odoo.exceptions import ValidationError
 from odoo.addons.onepay_payment import const
 
 _logger = logging.getLogger(__name__)
@@ -26,23 +21,22 @@ class PaymentProviderOnePay(models.Model):
         string="Merchant ID", default="TESTONEPAY", required_if_provider="onepay"
     )
     onepay_access_code = fields.Char(
-        string="Access Code",default="6BEB2546", required_if_provider="onepay"
+        string="Access Code", default="6BEB2546", required_if_provider="onepay"
     )
     onepay_secret_key = fields.Char(
-        string="Secret Key",default="6D0870CDE5F24F34F3915FB0045120DB", required_if_provider="onepay"
+        string="Secret Key", default="6D0870CDE5F24F34F3915FB0045120DB", required_if_provider="onepay"
     )
 
     @api.model
     def _get_compatible_providers(
-         self, *args, currency_id=None, is_validation=False, **kwargs
+        self, *args, currency_id=None, is_validation=False, **kwargs
     ):
-
         providers = super()._get_compatible_providers(
             *args, currency_id=currency_id, is_validation=is_validation, **kwargs
         )
 
         currency = self.env["res.currency"].browse(currency_id).exists()
-       
+
         if (
             currency and currency.name not in const.SUPPORTED_CURRENCIES
         ) or is_validation:
@@ -53,7 +47,7 @@ class PaymentProviderOnePay(models.Model):
     def _get_supported_currencies(self):
         """Override to return the supported currencies."""
         supported_currencies = super()._get_supported_currencies()
-        if self.code == "vnpay":
+        if self.code == "onepay":
             supported_currencies = supported_currencies.filtered(
                 lambda c: c.name in const.SUPPORTED_CURRENCIES
             )
@@ -61,33 +55,56 @@ class PaymentProviderOnePay(models.Model):
 
     def _get_payment_url(self, params, secret_key):
         """Generate the payment URL for OnePay"""
-        base_url = "https://mtf.onepay.vn/paygate/vpcpay.op?"
-        inputData = sorted(params.items())
-        queryString = ""
-        seq = 0
-        for key, val in inputData:
-            if seq == 1:
-                queryString = queryString + "&" + key + "=" + urllib.parse.quote_plus(str(val))
-            else:
-                seq = 1
-                queryString = key + "=" + urllib.parse.quote_plus(str(val))
+        params_sorted = self.sort_param(params)
+        string_to_hash = self.generate_string_to_hash(params_sorted)
+        _logger.debug("merchant's string to hash: %s", string_to_hash)
+        secure_hash = self.generate_secure_hash(string_to_hash, secret_key)
+        params_sorted['vpc_SecureHash'] = secure_hash
 
-        hashValue = self.hmac_sha256(secret_key, queryString)
-    # The final URL will be like this:
-        return base_url + queryString + "&vpc_SecureHash=" + hashValue
+        query_string = urllib.parse.urlencode(params_sorted)
+        payment_url = f"https://mtf.onepay.vn/paygate/vpcpay.op?{query_string}"
+        
+        _logger.debug(f"This is the payment link: {payment_url}")
+        print(f"Hello {payment_url}")
+        return payment_url
 
     @staticmethod
-    def hmac_sha256(key, data):
-        """Generate a HMAC SHA256 hash"""
+    def sort_param(params):
+        return dict(sorted(params.items()))
 
-        byteKey = key.encode("utf-8")
-        byteData = data.encode("utf-8")
-        return hmac.new(byteKey, byteData, hashlib.sha256).hexdigest()
+    @staticmethod
+    def generate_string_to_hash(params_sorted):
+        string_to_hash = ""
+        for key, value in params_sorted.items():
+            prefix_key = key[:4]
+            if prefix_key == "vpc_" or prefix_key == "user":
+                if key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
+                    value_str = str(value)
+                    if value_str:
+                        if string_to_hash:
+                            string_to_hash += "&"
+                        string_to_hash += key + "=" + value_str
+        return string_to_hash
+
+    @staticmethod
+    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str):
+        return PaymentProviderOnePay.vpc_auth(string_to_hash, onepay_secret_key)
+
+    @staticmethod
+    def vpc_auth(msg, key):
+        vpc_key = bytes.fromhex(key)
+        return PaymentProviderOnePay.hmac_sha256(vpc_key, msg).hex().upper()
+
+    @staticmethod
+    def hmac_sha256(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
 
     def _get_default_payment_method_codes(self):
-        """Override of `payment` to return the default payment method codes."""
+        """Override of payment to return the default payment method codes."""
+        default_method_codes = super()._get_default_payment_method_codes()
+        if self.code != "onepay":
+            return default_method_codes
+        return ["transfer", "manual"]
 
-        default_codes = super()._get_default_payment_method_codes()
-        if self.code != "vnpay":
-            return default_codes
-        return const.DEFAULT_PAYMENT_METHODS_CODES
+    def get_base_url(self):
+        return self.state == 'enabled' and 'https://mtf.onepay.vn/paygate/vpcpay.op?' or 'https://test.onepay.vn/paygate/vpcpay.op?'
