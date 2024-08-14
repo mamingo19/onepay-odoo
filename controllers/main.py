@@ -19,6 +19,17 @@ class OnePayController(http.Controller):
     _return_url = "/payment/onepay/return"
     _ipn_url = "/payment/onepay/webhook"
 
+    @http.route('/payment/onepay/redirect', type='http', auth='public', website=True)
+    def redirect_to_url(self, **kwargs):
+        _logger.info(kwargs)
+        url = kwargs.get('url')
+        if url:
+            _logger.info("REDIRECTING to: %s", url)
+            return request.redirect(url)
+        else:
+            _logger.error("No URL provided for redirection")
+            return request.redirect('/404')
+
     @http.route(
         _return_url,
         type="http",
