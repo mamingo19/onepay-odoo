@@ -54,14 +54,10 @@ class PaymentTransaction(models.Model):
         payment_link_data = self.provider_id._get_payment_url(
             params=params, secret_key=self.provider_id.onepay_secret_key
         )
-        response = requests.get(payment_link_data, allow_redirects=False)
-        _logger.info("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:")
-        _logger.info(response)
-        # Create a dictionary with the URL
+       
         rendering_values = {
-            'api_url': response.headers.get('location')
+            'api_url': payment_link_data
         }
-
         return rendering_values
     
     def _send_http_request(self, merchant_param):
