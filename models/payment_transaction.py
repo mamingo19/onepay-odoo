@@ -1,24 +1,22 @@
 import logging
-import pytz
+import socket
+import requests
+from datetime import datetime
 
 from werkzeug import urls
-from datetime import datetime, timedelta
-
-from odoo import _, models
+from odoo import models, _
 from odoo.exceptions import ValidationError
-
-from odoo.addons.payment import utils as payment_utils
 from odoo.addons.onepay_payment.controllers.main import OnePayController
 
 _logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     _inherit = "payment.transaction"
+    
+    BASE_URL = "https://mtf.onepay.vn/paygate/vpcpay.op?"
 
     def _get_specific_rendering_values(self, processing_values):
         """Override to return OnePay-specific rendering values.
-
-        Note: self.ensure_one() from _get_processing_values
 
         :param dict processing_values: The generic and specific processing values of the transaction
         :return: The dict of provider-specific processing values.
@@ -33,6 +31,10 @@ class PaymentTransaction(models.Model):
         base_url = self.provider_id.get_base_url()
         int_amount = int(self.amount)
 
+        ip_address = socket.gethostbyname(socket.gethostname())
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        vpc_ticket_no = f"{ip_address}-{timestamp}"
+
         params = {
             "vpc_Version": "2",
             "vpc_Command": "pay",
@@ -44,7 +46,7 @@ class PaymentTransaction(models.Model):
             "vpc_OrderInfo": f"Order: {self.reference}",
             "vpc_MerchTxnRef": self.reference,
             "vpc_Locale": "en",
-            "vpc_TicketNo": "192.168.166.149",
+            "vpc_TicketNo": vpc_ticket_no,
             "AgainLink": "http://localhost:8069/shop/payment",
             "Title": "Trip Payment"
         }
@@ -52,12 +54,26 @@ class PaymentTransaction(models.Model):
         payment_link_data = self.provider_id._get_payment_url(
             params=params, secret_key=self.provider_id.onepay_secret_key
         )
-
-        # Extract the payment link URL and embed it in the redirect form.
+        response = requests.get(payment_link_data, allow_redirects=False)
+        _logger.info("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:")
+        _logger.info(response)
+        # Create a dictionary with the URL
         rendering_values = {
-            "api_url": payment_link_data,
+            'api_url': response.headers.get('location')
         }
+
         return rendering_values
+    
+    def _send_http_request(self, merchant_param):
+        """Send HTTP request to OnePay with dynamic merchant parameters.
+
+        :param dict merchant_param: The dictionary containing OnePay parameters
+        :return: The URL for redirection
+        :rtype: str
+        """
+        BASE_URL = self.provider_id.get_base_url()
+        response = requests.get(BASE_URL, params=merchant_param, allow_redirects=False)
+        return response.headers.get('location')
 
     def _get_tx_from_notification_data(self, provider_code, notification_data):
         """Override to find the transaction based on OnePay data.
