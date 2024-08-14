@@ -101,7 +101,7 @@ class OnePayController(http.Controller):
 
         # Check if the transaction has already been processed.
         if tx_sudo.state in ["done", "cancel", "error"]:
-            # Return OnePay: Already update
+            # Return OnePay: Already updated
             return request.make_json_response(
                 {"RspCode": "02", "Message": "Order already confirmed"}
             )
@@ -111,15 +111,65 @@ class OnePayController(http.Controller):
         if response_code == "0":
             # Confirm the transaction if the payment was successful.
             tx_sudo._set_done()
+        elif response_code == "1":
+            tx_sudo._set_error(_("OnePay: Unspecified failure in authorization."))
+        elif response_code == "2":
+            tx_sudo._set_error(_("OnePay: Card Issuer declined to authorize the transaction."))
+        elif response_code == "3":
+            tx_sudo._set_error(_("OnePay: No response from Card Issuer."))
+        elif response_code == "4":
+            tx_sudo._set_error(_("OnePay: Invalid Expiration Date or your card is expired."))
+        elif response_code == "5":
+            tx_sudo._set_error(_("OnePay: Insufficient funds."))
+        elif response_code == "6":
+            tx_sudo._set_error(_("OnePay: No response from Card Issuer."))
+        elif response_code == "7":
+            tx_sudo._set_error(_("OnePay: System error while processing transaction."))
+        elif response_code == "8":
+            tx_sudo._set_error(_("OnePay: Card Issuer does not support online payment."))
+        elif response_code == "9":
+            tx_sudo._set_error(_("OnePay: Invalid Cardholder Name."))
+        elif response_code == "10":
+            tx_sudo._set_error(_("OnePay: Your card is expired or deactivated."))
+        elif response_code == "11":
+            tx_sudo._set_error(_("OnePay: Your card/account is not registered for online payment."))
+        elif response_code == "12":
+            tx_sudo._set_error(_("OnePay: Invalid Issue Date or Expiration Date."))
+        elif response_code == "13":
+            tx_sudo._set_error(_("OnePay: Transaction exceeded online payment limit."))
+        elif response_code == "14":
+            tx_sudo._set_error(_("OnePay: Invalid card number."))
+        elif response_code == "21":
+            tx_sudo._set_error(_("OnePay: Insufficient funds in your account."))
+        elif response_code == "22":
+            tx_sudo._set_error(_("OnePay: Invalid Account Information."))
+        elif response_code == "23":
+            tx_sudo._set_error(_("OnePay: Your card/account is blocked or not activated."))
         elif response_code == "24":
-            # Cancel the transaction if the payment was canceled by the user.
+            tx_sudo._set_error(_("OnePay: Invalid Card/Account Information."))
+        elif response_code == "25":
+            tx_sudo._set_error(_("OnePay: Invalid OTP."))
+        elif response_code == "26":
+            tx_sudo._set_error(_("OnePay: OTP has expired."))
+        elif response_code == "98":
+            tx_sudo._set_error(_("OnePay: Authentication was cancelled."))
+        elif response_code == "99":
             tx_sudo._set_canceled(state_message=_("The customer canceled the payment."))
+        elif response_code == "B":
+            tx_sudo._set_error(_("OnePay: Authentication failed."))
+        elif response_code == "D":
+            tx_sudo._set_error(_("OnePay: Authentication failed."))
+        elif response_code == "F":
+            tx_sudo._set_error(_("OnePay: Transaction authentication was not successful."))
+        elif response_code == "U":
+            tx_sudo._set_error(_("OnePay: CSC authentication was not successful."))
+        elif response_code == "Z":
+            tx_sudo._set_error(_("OnePay: Your transaction was declined."))
+        elif response_code == "253":
+            tx_sudo._set_error(_("OnePay: Your session has expired."))
         else:
-            # Notify the user that the payment failed.
-            tx_sudo._set_error(
-                "OnePay: "
-                + _("Received data with invalid response code: %s", response_code)
-            )
+            tx_sudo._set_error(_("OnePay: Unspecified failure."))
+
         # Return OnePay: Merchant update success
         return request.make_json_response(
             {"RspCode": "00", "Message": "Confirm Success"}
@@ -169,7 +219,7 @@ class OnePayController(http.Controller):
                     has_data = str(key) + "=" + urllib.parse.quote_plus(str(val))
 
         # Generate the expected signature.
-        expected_signature = OnePayController.__hmacsha512(
+        expected_signature = OnePayController.hmac_sha256(
             tx_sudo.provider_id.onepay_secret_key, has_data
         )
 
