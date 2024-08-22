@@ -3,8 +3,6 @@ import hmac
 import logging
 import pprint
 import urllib.parse
-import base64
-import time
 
 from werkzeug.exceptions import Forbidden
 from odoo import _, http
@@ -146,68 +144,55 @@ class OnePayController(http.Controller):
         )
 
     @staticmethod
-    def _verify_notification_signature(
-        method, uri, http_headers, signed_header_names, merchant_id, merchant_hash_code
-    ):
-        created = str(int(time.time()))
-        lowercase_headers = {}
-        for key, value in http_headers.items():
-            lowercase_headers[key.lower()] = value
-        lowercase_headers["(request-target)"] = method.lower() + " " + uri
-        lowercase_headers["(created)"] = created
+    def _verify_notification_signature(data, tx_sudo):
+        """Check that the received signature matches the expected one.
+        * The signature in the payment link and the signature in the notification data are different.
 
+        :param dict received_signature: The signature received with the notification data.
+        :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
+                                    `payment.transaction` record.
+
+        :return: None
+        :raise Forbidden: If the signatures don't match.
+        """
+        # Check if data is empty.
+        if not data:
+            _logger.warning("Received notification with missing data.")
+            raise Forbidden()
+
+        # Extract the received signature
+        received_signature = data.pop("vnp_SecureHash", None)
+
+        if not received_signature:
+            _logger.warning("Received notification with missing signature.")
+            raise Forbidden()
+
+        # Remove the signature type key if present
+        data.pop("vnp_SecureHashType", None)
+
+        # Sort the data by key to generate the expected signature.
+        sorted_data = sorted(data.items())
         signing_string = ""
-        header_names = ""
 
-        for element in signed_header_names:
-            header_name = element
-            if header_name not in lowercase_headers:
-                raise Exception("MissingRequiredHeaderException: " + header_name)
-            if signing_string:
-                signing_string += "\n"
-            signing_string += header_name + ": " + lowercase_headers[header_name]
+        # Build the signing string
+        for index, (key, value) in enumerate(sorted_data):
+            if key.startswith("vnp_"):
+                if signing_string:
+                    signing_string += "&"
+                signing_string += f"{key}={urllib.parse.quote_plus(str(value))}"
 
-            if header_names:
-                header_names += " "
-            header_names += header_name
-
-        print("signingString=" + signing_string)
-
-        # Generate the HMAC SHA-512 signature
-        signature = OnePayController.hmac_sha512(
-            merchant_hash_code, signing_string
+        # Generate the expected signature using HMAC SHA512
+        expected_signature = OnePayController.__hmacsha512(
+            tx_sudo.provider_id.onepay_secret_key, signing_string
         )
 
-        signing_algorithm = "hs2019"
-        return (
-            'algorithm="'
-            + signing_algorithm
-            + '"'
-            + ', keyId="'
-            + merchant_id
-            + '"'
-            + ', headers="'
-            + header_names
-            + '"'
-            + ", created="
-            + str(created)
-            + ', signature="'
-            + signature
-            + '"'
-        )
+        # Compare the received signature with the expected signature.
+        if not hmac.compare_digest(received_signature, expected_signature):
+            _logger.warning("Received notification with invalid signature.")
+            raise Forbidden()
 
     @staticmethod
-    def vpc_auth(msg, key):
-        vpc_key = bytes.fromhex(key)
-        vpc_hash = OnePayController.hmac_sha256(vpc_key, msg)
-        return vpc_hash.hex().upper()
+    def __hmacsha512(key, data):
+        """Generate a HMAC SHA512 hash"""
+        return hmac.new(key.encode("utf-8"), data.encode("utf-8"), hashlib.sha512).hexdigest()
 
-    @staticmethod
-    def hmac_sha256(key, msg):
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
-    @staticmethod
-    def hmac_sha512(key, msg):
-        return base64.b64encode(
-            hmac.new(key.encode("utf-8"), msg.encode("utf-8"), hashlib.sha512).digest()
-        ).decode("utf-8")
