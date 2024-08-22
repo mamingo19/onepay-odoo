@@ -48,6 +48,7 @@ class OnePayController(http.Controller):
         :return: The response to give to OnePay and acknowledge the notification
         """
 
+        _logger.info("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         _logger.info(
             "Notification received from OnePay with data:\n%s", pprint.pformat(data)
         )
@@ -133,6 +134,7 @@ class OnePayController(http.Controller):
 
         if response_code == "0":
             tx_sudo._set_done()
+
         elif response_code in error_messages:
             tx_sudo._set_error(f"OnePay: {error_messages[response_code]}")
         else:
