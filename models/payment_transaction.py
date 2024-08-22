@@ -47,7 +47,7 @@ class PaymentTransaction(models.Model):
             "vpc_MerchTxnRef": self.reference,
             "vpc_Locale": "en",
             "vpc_TicketNo": vpc_ticket_no,
-            "AgainLink": "http://localhost:8069/shop/payment",
+            "AgainLink": "https://dev02.t4tek.tk/shop/payment",
             "Title": "Trip Payment"
         }
 
