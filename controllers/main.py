@@ -47,7 +47,7 @@ class OnePayController(http.Controller):
         :param dict data: The notification data
         :return: The response to give to OnePay and acknowledge the notification
         """
-
+        _logger.info("Test ti choippppppppppppppppppppppppppppppp")
         _logger.info(
             "Notification received from OnePay with data:\n%s", pprint.pformat(data)
         )
