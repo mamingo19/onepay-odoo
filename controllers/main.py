@@ -35,7 +35,7 @@ class OnePayController(http.Controller):
         _ipn_url,
         type="http",
         auth="public",
-        methods=["GET"],
+        methods=["POST"],
         csrf=False,
         save_session=False,
     )
