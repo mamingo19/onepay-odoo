@@ -160,20 +160,20 @@ class OnePayController(http.Controller):
             _logger.warning("Received notification with missing data.")
             raise Forbidden()
 
-        receive_signature = data.get("vnp_SecureHash")
+        receive_signature = data.get("vpc_SecureHash")
 
         # Remove the signature from the data to verify.
-        if data.get("vnp_SecureHash"):
-            data.pop("vnp_SecureHash")
-        if data.get("vnp_SecureHashType"):
-            data.pop("vnp_SecureHashType")
+        if data.get("vpc_SecureHash"):
+            data.pop("vpc_SecureHash")
+        if data.get("vpc_SecureHashType"):
+            data.pop("vpc_SecureHashType")
 
         # Sort the data by key to generate the expected signature.
         inputData = sorted(data.items())
         hasData = ""
         seq = 0
         for key, val in inputData:
-            if str(key).startswith("vnp_"):
+            if str(key).startswith("vpc_"):
                 if seq == 1:
                     hasData = (
                         hasData
@@ -188,7 +188,7 @@ class OnePayController(http.Controller):
 
         # Generate the expected signature.
         expected_signature = OnePayController.__hmacsha512(
-            tx_sudo.provider_id.vnpay_hash_secret, hasData
+            tx_sudo.provider_id.onepay_secret_key, hasData
         )
 
         # Compare the received signature with the expected signature.
