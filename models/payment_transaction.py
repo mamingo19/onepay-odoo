@@ -42,12 +42,12 @@ class PaymentTransaction(models.Model):
             "vpc_Merchant": self.provider_id.onepay_merchant_id,
             "vpc_Amount": int_amount * 100,
             "vpc_Currency": "VND",
-            "vpc_ReturnURL": "https://mtf.onepay.vn/client/qt/dr/?id=1&mode=TEST_PAYGATE",
+            "vpc_ReturnURL": urls.url_join(base_url, OnePayController._return_url),
             "vpc_OrderInfo": f"Order: {self.reference}",
             "vpc_MerchTxnRef": self.reference,
             "vpc_Locale": "en",
             "vpc_TicketNo": vpc_ticket_no,
-            "AgainLink": "https://dev02.t4tek.tk/shop/payment",
+            "AgainLink": urls.url_join(base_url, "/shop/payment"),
             "Title": "Trip Payment"
         }
 
