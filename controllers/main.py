@@ -47,7 +47,7 @@ class OnePayController(http.Controller):
         :param dict data: The notification data
         :return: The response to give to OnePay and acknowledge the notification
         """
-        _logger.info("Test ti choippppppppppppppppppppppppppppppp")
+
         _logger.info(
             "Notification received from OnePay with data:\n%s", pprint.pformat(data)
         )
@@ -146,35 +146,60 @@ class OnePayController(http.Controller):
     @staticmethod
     def _verify_notification_signature(data, tx_sudo):
         """Check that the received signature matches the expected one.
+        * The signature in the payment link and the signature in the notification data are different.
 
-        :param dict data: The notification data
+        :param dict received_signature: The signature received with the notification data.
         :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
-                                   `payment.transaction` record.
+                                    `payment.transaction` record.
+
+        :return: None
         :raise Forbidden: If the signatures don't match.
         """
-
+        # Check if data is empty.
         if not data:
             _logger.warning("Received notification with missing data.")
             raise Forbidden()
 
-        received_signature = data.pop("vpc_SecureHash", None)
-        data.pop("vpc_SecureHashType", None)
+        receive_signature = data.get("vnp_SecureHash")
 
-        sorted_data = sorted(data.items())
-        formatted_data = "&".join(f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in sorted_data if k.startswith("vpc_"))
+        # Remove the signature from the data to verify.
+        if data.get("vnp_SecureHash"):
+            data.pop("vnp_SecureHash")
+        if data.get("vnp_SecureHashType"):
+            data.pop("vnp_SecureHashType")
 
-        expected_signature = OnePayController.hmac_sha256(
-            tx_sudo.provider_id.onepay_secret_key, formatted_data
+        # Sort the data by key to generate the expected signature.
+        inputData = sorted(data.items())
+        hasData = ""
+        seq = 0
+        for key, val in inputData:
+            if str(key).startswith("vnp_"):
+                if seq == 1:
+                    hasData = (
+                        hasData
+                        + "&"
+                        + str(key)
+                        + "="
+                        + urllib.parse.quote_plus(str(val))
+                    )
+                else:
+                    seq = 1
+                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
+
+        # Generate the expected signature.
+        expected_signature = OnePayController.__hmacsha512(
+            tx_sudo.provider_id.vnpay_hash_secret, hasData
         )
 
-        if not hmac.compare_digest(received_signature, expected_signature):
+        # Compare the received signature with the expected signature.
+        if not hmac.compare_digest(receive_signature, expected_signature):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
 
     @staticmethod
-    def hmac_sha256(key, data):
-        """Generate a HMAC SHA256 hash"""
+    def __hmacsha512(key, data):
+        """Generate a HMAC SHA512 hash"""
 
-        byte_key = key.encode("utf-8")
-        byte_data = data.encode("utf-8")
-        return hmac.new(byte_key, byte_data, hashlib.sha256).hexdigest()
+        byteKey = key.encode("utf-8")
+        byteData = data.encode("utf-8")
+        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
