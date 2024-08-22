@@ -1,205 +1,107 @@
-import hashlib
-import hmac
 import logging
-import pprint
+import requests
+import hmac
+import hashlib
 import urllib.parse
-
-from werkzeug.exceptions import Forbidden
-from odoo import _, http
-from odoo.exceptions import ValidationError
-from odoo.http import request
+from odoo import _, api, fields, models
+from odoo.addons.onepay_payment import const
 
 _logger = logging.getLogger(__name__)
 
-class OnePayController(http.Controller):
-    _return_url = "/payment/onepay/return"
-    _ipn_url = "/payment/onepay/callback"
+class PaymentProviderOnePay(models.Model):
+    _inherit = "payment.provider"
 
-    @http.route(
-        _return_url,
-        type="http",
-        methods=["GET"],
-        auth="public",
-        csrf=False,
-        save_session=False,
+    # Add 'OnePay' as a new payment provider
+    code = fields.Selection(
+        selection_add=[("onepay", "OnePay")], ondelete={"onepay": "set default"}
     )
-    def onepay_return_from_checkout(self, **data):
-        """No need to handle the data from the return URL because the IPN already handled it."""
 
-        _logger.info("Handling redirection from OnePay.")
-
-        # Redirect user to the status page.
-        return request.redirect("/payment/status")
-
-    @http.route(
-        _ipn_url,
-        type="http",
-        auth="public",
-        methods=["GET"],
-        csrf=False,
-        save_session=False,
+    # Define fields for OnePay's Merchant ID, Access Code, and Secret Key
+    onepay_merchant_id = fields.Char(
+        string="Merchant ID", default="TESTONEPAY", required_if_provider="onepay"
     )
-    def onepay_webhook(self, **data):
-        """Process the notification data (IPN) sent by OnePay to the webhook.
+    onepay_access_code = fields.Char(
+        string="Access Code", default="6BEB2546", required_if_provider="onepay"
+    )
+    onepay_secret_key = fields.Char(
+        string="Secret Key", default="6D0870CDE5F24F34F3915FB0045120DB", required_if_provider="onepay"
+    )
 
-        The "Instant Payment Notification" is a classical webhook notification.
-
-        :param dict data: The notification data
-        :return: The response to give to OnePay and acknowledge the notification
-        """
-
-        _logger.info(
-            "Notification received from OnePay with data:\n%s", pprint.pformat(data)
+    @api.model
+    def _get_compatible_providers(
+        self, *args, currency_id=None, is_validation=False, **kwargs
+    ):
+        providers = super()._get_compatible_providers(
+            *args, currency_id=currency_id, is_validation=is_validation, **kwargs
         )
-        try:
-            tx_sudo = (
-                request.env["payment.transaction"]
-                .sudo()
-                ._get_tx_from_notification_data("onepay", data)
-            )
-            # Verify the signature of the notification data.
-            self._verify_notification_signature(data, tx_sudo)
-            # Handle the notification data
-            tx_sudo._handle_notification_data("onepay", data)
-        except Forbidden:
-            _logger.warning(
-                "Forbidden error during signature verification",
-                exc_info=True,
-            )
-            # Set the transaction to error due to invalid signature
-            tx_sudo._set_error("OnePay: " + _("Received data with invalid signature."))
-            return request.make_json_response(
-                {"RspCode": "97", "Message": "Invalid Checksum"}
-            )
 
-        except AssertionError:
-            _logger.warning(
-                "Assertion error during notification handling",
-                exc_info=True,
+        currency = self.env["res.currency"].browse(currency_id).exists()
+
+        if (
+            currency and currency.name not in const.SUPPORTED_CURRENCIES
+        ) or is_validation:
+            providers = providers.filtered(lambda p: p.code != "onepay")
+
+        return providers
+
+    def _get_supported_currencies(self):
+        """Override to return the supported currencies."""
+        supported_currencies = super()._get_supported_currencies()
+        if self.code == "onepay":
+            supported_currencies = supported_currencies.filtered(
+                lambda c: c.name in const.SUPPORTED_CURRENCIES
             )
-            tx_sudo._set_error("OnePay: " + _("Received data with invalid amount."))
-            return request.make_json_response(
-                {"RspCode": "04", "Message": "Invalid amount"}
-            )
+        return supported_currencies
 
-        except ValidationError:
-            _logger.warning(
-                "Unable to handle the notification data",
-                exc_info=True,
-            )
-            return request.make_json_response(
-                {"RspCode": "01", "Message": "Order Not Found"}
-            )
+    def _get_payment_url(self, params, secret_key):
+        """Generate the payment URL for OnePay"""
+        params_sorted = self.sort_param(params)
+        string_to_hash = self.generate_string_to_hash(params_sorted)
+        _logger.debug("merchant's string to hash: %s", string_to_hash)
+        secure_hash = self.generate_secure_hash(string_to_hash, secret_key)
+        params_sorted['vpc_SecureHash'] = secure_hash
 
-        # Check if the transaction has already been processed.
-        if tx_sudo.state in ["done", "cancel", "error"]:
-            return request.make_json_response(
-                {"RspCode": "02", "Message": "Order already confirmed"}
-            )
-
-        response_code = data.get("vpc_TxnResponseCode")
-        _logger.info("Transaction response code: %s", response_code)
-
-        error_messages = {
-            "1": _("Unspecified failure in authorization."),
-            "2": _("Card Issuer declined to authorize the transaction."),
-            "3": _("No response from Card Issuer."),
-            "4": _("Invalid Expiration Date or your card is expired."),
-            "5": _("Insufficient funds."),
-            "6": _("No response from Card Issuer."),
-            "7": _("System error while processing transaction."),
-            "8": _("Card Issuer does not support online payment."),
-            "9": _("Invalid Cardholder Name."),
-            "10": _("Your card is expired or deactivated."),
-            "11": _("Your card/account is not registered for online payment."),
-            "12": _("Invalid Issue Date or Expiration Date."),
-            "13": _("Transaction exceeded online payment limit."),
-            "14": _("Invalid card number."),
-            "21": _("Insufficient funds in your account."),
-            "22": _("Invalid Account Information."),
-            "23": _("Your card/account is blocked or not activated."),
-            "24": _("Invalid Card/Account Information."),
-            "25": _("Invalid OTP."),
-            "26": _("OTP has expired."),
-            "98": _("Authentication was cancelled."),
-            "99": _("The customer canceled the payment."),
-            "B": _("Authentication failed."),
-            "D": _("Authentication failed."),
-            "F": _("Transaction authentication was not successful."),
-            "U": _("CSC authentication was not successful."),
-            "Z": _("Your transaction was declined."),
-            "253": _("Your session has expired."),
-        }
-
-        if response_code == "0":
-            tx_sudo._set_done()
-
-        elif response_code in error_messages:
-            tx_sudo._set_error(f"OnePay: {error_messages[response_code]}")
-        else:
-            tx_sudo._set_error(_("OnePay: Unspecified failure."))
-
-        return request.make_json_response(
-            {"RspCode": "00", "Message": "Confirm Success"}
-        )
+        query_string = urllib.parse.urlencode(params_sorted)
+        payment_url = f"https://mtf.onepay.vn/paygate/vpcpay.op?{query_string}"
+        
+        print(f"Print out this for me: {payment_url}")
+        return payment_url
 
     @staticmethod
-    def _verify_notification_signature(data, tx_sudo):
-        """Check that the received signature matches the expected one.
-        * The signature in the payment link and the signature in the notification data are different.
-
-        :param dict received_signature: The signature received with the notification data.
-        :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
-                                    `payment.transaction` record.
-
-        :return: None
-        :raise Forbidden: If the signatures don't match.
-        """
-        # Check if data is empty.
-        if not data:
-            _logger.warning("Received notification with missing data.")
-            raise Forbidden()
-
-        receive_signature = data.get("vnp_SecureHash")
-
-        # Remove the signature from the data to verify.
-        if data.get("vnp_SecureHash"):
-            data.pop("vnp_SecureHash")
-        if data.get("vnp_SecureHashType"):
-            data.pop("vnp_SecureHashType")
-
-        # Sort the data by key to generate the expected signature.
-        inputData = sorted(data.items())
-        hasData = ""
-        seq = 0
-        for key, val in inputData:
-            if str(key).startswith("vnp_"):
-                if seq == 1:
-                    hasData = (
-                        hasData
-                        + "&"
-                        + str(key)
-                        + "="
-                        + urllib.parse.quote_plus(str(val))
-                    )
-                else:
-                    seq = 1
-                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
-
-        # Generate the expected signature.
-        expected_signature = OnePayController.__hmacsha512(
-            tx_sudo.provider_id.onepay_secret_key, hasData
-        )
-
-        # Compare the received signature with the expected signature.
-        if not hmac.compare_digest(receive_signature, expected_signature):
-            _logger.warning("Received notification with invalid signature.")
-            raise Forbidden()
+    def sort_param(params):
+        return dict(sorted(params.items()))
 
     @staticmethod
-    def __hmacsha512(key, data):
-        """Generate a HMAC SHA512 hash"""
+    def generate_string_to_hash(params_sorted):
+        string_to_hash = ""
+        for key, value in params_sorted.items():
+            prefix_key = key[0:4]
+            if (prefix_key == "vpc_" or prefix_key == "user"):
+                if (key != "vpc_SecureHashType" and key != "vpc_SecureHash"):
+                    value_str = str(value)
+                    if (len(value_str) > 0):
+                        if (len(string_to_hash) > 0):
+                            string_to_hash += "&"
+                        string_to_hash += key + "=" + value_str
+        return string_to_hash
 
-        byteKey = key.encode("utf-8")
-        byteData = data.encode("utf-8")
-        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
+
+    @staticmethod
+    def generate_secure_hash(string_to_hash:str, onepay_secret_key:str):
+        return PaymentProviderOnePay.vpc_auth(string_to_hash, onepay_secret_key)
+
+    @staticmethod
+    def vpc_auth(msg, key):
+        vpc_key = bytes.fromhex(key)
+        return PaymentProviderOnePay.hmac_sha256(vpc_key, msg).hex().upper()
+
+    @staticmethod
+    def hmac_sha256(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+    def _get_default_payment_method_codes(self):
+        """Override of payment to return the default payment method codes."""
+        default_codes = super()._get_default_payment_method_codes()
+        if self.code != "onepay":
+            return default_codes
+        return const.DEFAULT_PAYMENT_METHODS_CODES
