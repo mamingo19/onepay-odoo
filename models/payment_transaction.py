@@ -48,8 +48,11 @@ class PaymentTransaction(models.Model):
             "vpc_Locale": "en",
             "vpc_TicketNo": vpc_ticket_no,
             "AgainLink": urls.url_join(base_url, "/shop/payment"),
-            "Title": "Trip Payment"
+            "Title": "Trip Payment",
+            "vpc_CallbackURL": urls.url_join(base_url.replace("http://", "https://", 1), '/payment/onepay/callback')  # URL callback
+            
         }
+        _logger.info(urls.url_join(base_url, '/payment/onepay/callback'))
 
         payment_link_data = self.provider_id._get_payment_url(
             params=params, secret_key=self.provider_id.onepay_secret_key
