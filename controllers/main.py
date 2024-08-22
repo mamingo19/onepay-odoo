@@ -13,7 +13,7 @@ _logger = logging.getLogger(__name__)
 
 class OnePayController(http.Controller):
     _return_url = "/payment/onepay/return"
-    _ipn_url = "/payment/onepay/webhook"
+    _ipn_url = "/payment/onepay/callback"
 
     @http.route(
         _return_url,
@@ -35,7 +35,7 @@ class OnePayController(http.Controller):
         _ipn_url,
         type="http",
         auth="public",
-        methods=["POST"],
+        methods=["GET"],
         csrf=False,
         save_session=False,
     )
@@ -48,7 +48,6 @@ class OnePayController(http.Controller):
         :return: The response to give to OnePay and acknowledge the notification
         """
 
-        _logger.info("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         _logger.info(
             "Notification received from OnePay with data:\n%s", pprint.pformat(data)
         )
