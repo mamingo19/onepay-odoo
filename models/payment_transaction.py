@@ -62,17 +62,6 @@ class PaymentTransaction(models.Model):
             'api_url': payment_link_data
         }
         return rendering_values
-    
-    def _send_http_request(self, merchant_param):
-        """Send HTTP request to OnePay with dynamic merchant parameters.
-
-        :param dict merchant_param: The dictionary containing OnePay parameters
-        :return: The URL for redirection
-        :rtype: str
-        """
-        BASE_URL = self.provider_id.get_base_url()
-        response = requests.get(BASE_URL, params=merchant_param, allow_redirects=False)
-        return response.headers.get('location')
 
     def _get_tx_from_notification_data(self, provider_code, notification_data):
         """Override to find the transaction based on OnePay data.
