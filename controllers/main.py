@@ -4,6 +4,7 @@ import logging
 import pprint
 import urllib.parse
 import base64
+import time
 
 from werkzeug.exceptions import Forbidden
 from odoo import _, http
@@ -144,47 +145,44 @@ class OnePayController(http.Controller):
             {"RspCode": "00", "Message": "Confirm Success"}
         )
     @staticmethod
-    def _verify_request_signature(data, tx_sudo):
-        """
-        Check that the generated signature matches the expected one for ITA requests.
-        
-        :param dict data: The data received with the request.
-        :param recordset tx_sudo: The sudoed transaction referenced by the request data, as a `payment.transaction` record.
-        
-        :return: None
-        :raise Forbidden: If the signatures don't match.
-        """
-        if not data:
-            _logger.warning("Received request with missing data.")
-            raise Forbidden()
+    def create_request_signature_ita(
+        method, uri, http_headers, signed_header_names, merchant_id, merchant_hash_code
+    ):
+        created = str(int(time.time()))
+        lowercase_headers = {}
+        for key, value in http_headers.items():
+            lowercase_headers[key.lower()] = value
+        lowercase_headers["(request-target)"] = method.lower() + " " + uri
+        lowercase_headers["(created)"] = created
 
-        # Extract the received signature from the data
-        received_signature = data.pop("signature", None)
-        
-        if not received_signature:
-            _logger.warning("Received request with missing signature.")
-            raise Forbidden()
-
-        # Sort the headers by name to generate the expected signature
-        sorted_headers = sorted(data.items())
         signing_string = ""
+        header_names = []
 
-        # Build the signing string
-        for index, (key, value) in enumerate(sorted_headers):
-            if key.startswith("(request-target)") or key.startswith("(created)") or key.lower() in tx_sudo.provider_id.onepay_signed_headers:
-                if signing_string:
-                    signing_string += "\n"
-                signing_string += f"{key}: {value}"
+        for header_name in signed_header_names:
+            header_name_lower = header_name.lower()
+            if header_name_lower not in lowercase_headers:
+                raise Exception(f"MissingRequiredHeaderException: {header_name}")
+            if signing_string:
+                signing_string += "\n"
+            signing_string += f"{header_name}: {lowercase_headers[header_name_lower]}"
+            header_names.append(header_name)
 
-        # Generate the expected signature using HMAC SHA512
-        hmac_key = bytes.fromhex(tx_sudo.provider_id.onepay_secret_key)
-        expected_signature = base64.b64encode(
-            hmac.new(hmac_key, signing_string.encode('utf-8'), hashlib.sha512).digest()
-        ).decode('utf-8')
+        print("signingString=" + signing_string)
 
-        # Compare the received signature with the expected signature
-        if not hmac.compare_digest(received_signature, expected_signature):
-            _logger.warning("Received request with invalid signature.")
-            raise Forbidden()
+        hmac_key = bytes.fromhex(merchant_hash_code)
+        signature = base64.b64encode(
+            hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).digest()
+        ).decode("utf-8")
+
+        signing_algorithm = "hs2019"
+        signature_header = (
+            f'algorithm="{signing_algorithm}", '
+            f'keyId="{merchant_id}", '
+            f'headers="{(" ".join(header_names))}", '
+            f'created={created}, '
+            f'signature="{signature}"'
+        )
+
+        return signature_header
 
 
