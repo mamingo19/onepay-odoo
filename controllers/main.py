@@ -142,23 +142,23 @@ class OnePayController(http.Controller):
             _logger.warning("Received notification with missing data.")
             raise Forbidden()
 
-        received_signature = data.get("vpc_SecureHash")
+        receive_signature = data.get("vnp_SecureHash")
 
         # Remove the signature from the data to verify.
-        if data.get("vpc_SecureHash"):
-            data.pop("vpc_SecureHash")
-        if data.get("vpc_SecureHashType"):
-            data.pop("vpc_SecureHashType")
+        if data.get("vnp_SecureHash"):
+            data.pop("vnp_SecureHash")
+        if data.get("vnp_SecureHashType"):
+            data.pop("vnp_SecureHashType")
 
         # Sort the data by key to generate the expected signature.
-        input_data = sorted(data.items())
-        has_data = ""
+        inputData = sorted(data.items())
+        hasData = ""
         seq = 0
-        for key, val in input_data:
-            if str(key).startswith("vpc_"):
+        for key, val in inputData:
+            if str(key).startswith("vnp_"):
                 if seq == 1:
-                    has_data = (
-                        has_data
+                    hasData = (
+                        hasData
                         + "&"
                         + str(key)
                         + "="
@@ -166,24 +166,26 @@ class OnePayController(http.Controller):
                     )
                 else:
                     seq = 1
-                    has_data = str(key) + "=" + urllib.parse.quote_plus(str(val))
+                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
 
         # Generate the expected signature.
-        expected_signature = OnePayController.hmac_sha256(
-            tx_sudo.provider_id.onepay_secret_key, has_data
+        expected_signature = OnePayController.__hmacsha512(
+            tx_sudo.provider_id.vnpay_hash_secret, hasData
         )
 
         # Compare the received signature with the expected signature.
-        if not hmac.compare_digest(received_signature, expected_signature):
-            _logger.info("Test ti choi 1: %s", received_signature)
-            _logger.info("Test ti choi 2: %s", expected_signature)
+        if not hmac.compare_digest(receive_signature, expected_signature):
+            _logger.warning("Test ti choi 1111111111111111111: %s", receive_signature)
+            _logger.warning("Test ti choi 2222222222222222222: %s", expected_signature)
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
 
     @staticmethod
-    def hmac_sha256(key, data):
-        """Generate a HMAC SHA256 hash"""
+    def __hmacsha512(key, data):
+        """Generate a HMAC SHA512 hash"""
 
-        byte_key = key.encode("utf-8")
-        byte_data = data.encode("utf-8")
-        return hmac.new(byte_key, byte_data, hashlib.sha256).hexdigest()
+        byteKey = key.encode("utf-8")
+        byteData = data.encode("utf-8")
+        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
+    
+
