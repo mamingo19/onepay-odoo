@@ -130,7 +130,7 @@ class OnePayController(http.Controller):
         """Check that the received signature matches the expected one.
         * The signature in the payment link and the signature in the notification data are different.
 
-        :param dict received_signature: The signature received with the notification data.
+        :param dict data: The notification data received from OnePay.
         :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
                                     `payment.transaction` record.
 
@@ -140,52 +140,50 @@ class OnePayController(http.Controller):
         # Check if data is empty.
         if not data:
             _logger.warning("Received notification with missing data.")
-            raise Forbidden()
+            raise Forbidden("Missing data in notification")
 
-        receive_signature = data.get("vnp_SecureHash")
+        received_signature = data.get("vnp_SecureHash")
 
-        # Remove the signature from the data to verify.
-        if data.get("vnp_SecureHash"):
-            data.pop("vnp_SecureHash")
-        if data.get("vnp_SecureHashType"):
-            data.pop("vnp_SecureHashType")
+        if not received_signature:
+            _logger.warning("Received notification with missing signature.")
+            raise Forbidden("Missing signature in notification")
+
+        # Remove the signature-related fields from the data before generating the expected signature.
+        data_to_verify = data.copy()
+        data_to_verify.pop("vnp_SecureHash", None)
+        data_to_verify.pop("vnp_SecureHashType", None)
 
         # Sort the data by key to generate the expected signature.
-        inputData = sorted(data.items())
-        hasData = ""
-        seq = 0
-        for key, val in inputData:
+        sorted_data = sorted(data_to_verify.items())
+        has_data = ""
+        for key, value in sorted_data:
             if str(key).startswith("vnp_"):
-                if seq == 1:
-                    hasData = (
-                        hasData
-                        + "&"
-                        + str(key)
-                        + "="
-                        + urllib.parse.quote_plus(str(val))
-                    )
-                else:
-                    seq = 1
-                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
+                if has_data:
+                    has_data += "&"
+                has_data += f"{key}={urllib.parse.quote_plus(str(value))}"
 
-        # Generate the expected signature.
-        expected_signature = OnePayController.__hmacsha512(
-            tx_sudo.provider_id.onepay_hash_secret, hasData
+        # Generate the expected signature using HMAC-SHA256.
+        expected_signature = OnePayController.__hmacsha256(
+            tx_sudo.acquirer_id.onepay_hash_secret, has_data
         )
 
+        # Log the expected and received signatures to Docker logs for debugging.
+        _logger.info("Expected signature: %s", expected_signature)
+        _logger.info("Received signature: %s", received_signature)
+
         # Compare the received signature with the expected signature.
-        if not hmac.compare_digest(receive_signature, expected_signature):
-            _logger.warning("Test ti choi 1111111111111111111: %s", receive_signature)
-            _logger.warning("Test ti choi 2222222222222222222: %s", expected_signature)
+        if not hmac.compare_digest(received_signature.upper(), expected_signature.upper()):
             _logger.warning("Received notification with invalid signature.")
-            raise Forbidden()
+            raise Forbidden("Invalid signature in notification")
+
+        _logger.info("Notification signature verified successfully.")
 
     @staticmethod
-    def __hmacsha512(key, data):
-        """Generate a HMAC SHA512 hash"""
+    def __hmacsha256(key, data):
+        """Generate a HMAC SHA256 hash"""
+        byte_key = key.encode("utf-8")
+        byte_data = data.encode("utf-8")
+        return hmac.new(byte_key, byte_data, hashlib.sha256).hexdigest()
 
-        byteKey = key.encode("utf-8")
-        byteData = data.encode("utf-8")
-        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
     
 
