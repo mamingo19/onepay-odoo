@@ -128,52 +128,33 @@ class OnePayController(http.Controller):
 
     @staticmethod
     def _verify_notification_signature(data, tx_sudo):
-        """Check that the received signature matches the expected one.
-        * The signature in the payment link and the signature in the notification data are different.
+        """Verify the notification signature received from OnePay.
 
-        :param dict received_signature: The signature received with the notification data.
-        :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
-                                    `payment.transaction` record.
-
-        :return: None
-        :raise Forbidden: If the signatures don't match.
+        :param dict data: The notification data
+        :param payment.transaction tx_sudo: The payment transaction record
+        :raises: Forbidden if the signature is invalid
         """
-        # Check if data is empty.
-        if not data:
-            _logger.warning("Received notification with missing data.")
-            raise Forbidden()
 
-        received_signature = data.get("vpc_SecureHash")
+        # Step 1: Sort the received data by keys
+        params_sorted = dict(sorted(data.items()))
 
-        # Remove the signature from the data to verify.
-        data.pop("vpc_SecureHash", None)
-        data.pop("vpc_SecureHashType", None)
+        # Step 2: Generate the string to hash
+        string_to_hash = PaymentProviderOnePay.generate_string_to_hash(params_sorted)
 
-        # Sort the data by key to generate the expected signature.
-        input_data = sorted(data.items())
-        has_data = ""
-        seq = 0
-        for key, val in input_data:
-            if str(key).startswith("vpc_"):
-                if seq == 1:
-                    has_data = (
-                        has_data
-                        + "&"
-                        + str(key)
-                        + "="
-                        + urllib.parse.quote_plus(str(val))
-                    )
-                else:
-                    seq = 1
-                    has_data = str(key) + "=" + urllib.parse.quote_plus(str(val))
+        # Step 3: Generate the secure hash using the OnePay secret key
+        onepay_secret_key = tx_sudo.acquirer_id.onepay_secret_key
+        generated_secure_hash = PaymentProviderOnePay.generate_secure_hash(
+            string_to_hash, onepay_secret_key
+        )
 
-        # Generate the expected signature using PaymentProviderOnePay's vpc_auth method.
-        expected_signature = PaymentProviderOnePay.vpc_auth(has_data, tx_sudo.provider_id.onepay_secret_key)
+        # Step 4: Compare the generated secure hash with the provided hash in the notification data
+        received_secure_hash = data.get("vpc_SecureHash")
+        if received_secure_hash != generated_secure_hash:
+            _logger.warning("Invalid signature: expected %s, received %s",
+                            generated_secure_hash, received_secure_hash)
+            raise Forbidden("Invalid signature")
 
-        # Compare the received signature with the expected signature.
-        if not hmac.compare_digest(received_signature, expected_signature):
-            _logger.warning("Received notification with invalid signature.")
-            raise Forbidden()
+        _logger.info("Signature verified successfully.")
 
     @staticmethod
     def hmac_sha256(key, data):
