@@ -170,7 +170,7 @@ class OnePayController(http.Controller):
 
         # Generate the expected signature.
         expected_signature = OnePayController.__hmacsha512(
-            tx_sudo.provider_id.vnpay_hash_secret, hasData
+            tx_sudo.provider_id.onepay_hash_secret, hasData
         )
 
         # Compare the received signature with the expected signature.
