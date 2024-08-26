@@ -3,8 +3,6 @@ import hmac
 import logging
 import pprint
 import urllib.parse
-import base64
-import time
 
 from werkzeug.exceptions import Forbidden
 from odoo import _, http
@@ -15,7 +13,8 @@ _logger = logging.getLogger(__name__)
 
 class OnePayController(http.Controller):
     _return_url = "/payment/onepay/return"
-    _ipn_url = "/payment/onepay/callback"
+    _ipn_url = "/payment/onepay/webhook"
+    _callback_url = "/payment/onepay/callback"
 
     @http.route(
         _return_url,
@@ -32,6 +31,68 @@ class OnePayController(http.Controller):
 
         # Redirect user to the status page.
         return request.redirect("/payment/status")
+    
+    @http.route(
+    _callback_url,
+    type="http",
+    methods=["POST"],
+    auth="public",
+    csrf=False,
+    save_session=False,
+    )
+    def onepay_callback(self, **data):
+        """Process the callback data sent by OnePay to the specified URL.
+        
+        This function handles the callback URL processing for OnePay payments.
+        
+        :param dict data: The callback data received from OnePay.
+        :return: A response to acknowledge receipt of the callback.
+        """
+        
+        _logger.info("Callback received from OnePay with data:\n%s", pprint.pformat(data))
+        
+        try:
+            # Fetch the transaction related to the callback
+            tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data("onepay", data)
+            
+            # Verify the signature (this function should be defined as in your original code)
+            self._verify_notification_signature(data, tx_sudo)
+            
+            # Handle the callback data (this is custom to your application)
+            tx_sudo._handle_notification_data("onepay", data)
+        
+        except Forbidden:
+            _logger.warning("Forbidden error during signature verification", exc_info=True)
+            tx_sudo._set_error("OnePay: " + _("Invalid signature in callback data."))
+            return request.make_json_response({"RspCode": "97", "Message": "Invalid Checksum"})
+        
+        except ValidationError:
+            _logger.warning("Validation error during callback data processing", exc_info=True)
+            return request.make_json_response({"RspCode": "01", "Message": "Order Not Found"})
+        
+        # Check the transaction state and proceed accordingly
+        if tx_sudo.state in ["done", "cancel", "error"]:
+            return request.make_json_response({"RspCode": "02", "Message": "Order already confirmed"})
+        
+        response_code = data.get("vpc_TxnResponseCode")
+        _logger.info("Transaction response code: %s", response_code)
+        
+        if response_code == "0":
+            tx_sudo._set_done()
+        else:
+            error_message = self._get_error_message(response_code)
+            tx_sudo._set_error(f"OnePay: {error_message}")
+        
+        return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
+
+    @staticmethod
+    def _get_error_message(response_code):
+        error_messages = {
+            "1": _("Unspecified failure in authorization."),
+            "2": _("Card Issuer declined to authorize the transaction."),
+            # Add other error codes and their corresponding messages as needed
+        }
+        return error_messages.get(response_code, _("Unspecified failure."))
 
     @http.route(
         _ipn_url,
@@ -144,45 +205,65 @@ class OnePayController(http.Controller):
         return request.make_json_response(
             {"RspCode": "00", "Message": "Confirm Success"}
         )
+
     @staticmethod
-    def create_request_signature_ita(
-        method, uri, http_headers, signed_header_names, merchant_id, merchant_hash_code
-    ):
-        created = str(int(time.time()))
-        lowercase_headers = {}
-        for key, value in http_headers.items():
-            lowercase_headers[key.lower()] = value
-        lowercase_headers["(request-target)"] = method.lower() + " " + uri
-        lowercase_headers["(created)"] = created
+    def _verify_notification_signature(data, tx_sudo):
+        """Check that the received signature matches the expected one.
+        * The signature in the payment link and the signature in the notification data are different.
 
-        signing_string = ""
-        header_names = []
+        :param dict received_signature: The signature received with the notification data.
+        :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
+                                    `payment.transaction` record.
 
-        for header_name in signed_header_names:
-            header_name_lower = header_name.lower()
-            if header_name_lower not in lowercase_headers:
-                raise Exception(f"MissingRequiredHeaderException: {header_name}")
-            if signing_string:
-                signing_string += "\n"
-            signing_string += f"{header_name}: {lowercase_headers[header_name_lower]}"
-            header_names.append(header_name)
+        :return: None
+        :raise Forbidden: If the signatures don't match.
+        """
+        # Check if data is empty.
+        if not data:
+            _logger.warning("Received notification with missing data.")
+            raise Forbidden()
 
-        print("signingString=" + signing_string)
+        receive_signature = data.get("vnp_SecureHash")
 
-        hmac_key = bytes.fromhex(merchant_hash_code)
-        signature = base64.b64encode(
-            hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).digest()
-        ).decode("utf-8")
+        # Remove the signature from the data to verify.
+        if data.get("vnp_SecureHash"):
+            data.pop("vnp_SecureHash")
+        if data.get("vnp_SecureHashType"):
+            data.pop("vnp_SecureHashType")
 
-        signing_algorithm = "hs2019"
-        signature_header = (
-            f'algorithm="{signing_algorithm}", '
-            f'keyId="{merchant_id}", '
-            f'headers="{(" ".join(header_names))}", '
-            f'created={created}, '
-            f'signature="{signature}"'
+        # Sort the data by key to generate the expected signature.
+        inputData = sorted(data.items())
+        hasData = ""
+        seq = 0
+        for key, val in inputData:
+            if str(key).startswith("vnp_"):
+                if seq == 1:
+                    hasData = (
+                        hasData
+                        + "&"
+                        + str(key)
+                        + "="
+                        + urllib.parse.quote_plus(str(val))
+                    )
+                else:
+                    seq = 1
+                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
+
+        # Generate the expected signature.
+        expected_signature = OnePayController.__hmacsha512(
+            tx_sudo.provider_id.onepay_hash_secret, hasData
         )
 
-        return signature_header
+        # Compare the received signature with the expected signature.
+        if not hmac.compare_digest(receive_signature, expected_signature):
+            _logger.warning("Received notification with invalid signature.")
+            raise Forbidden()
 
+    @staticmethod
+    def __hmacsha512(key, data):
+        """Generate a HMAC SHA512 hash"""
+
+        byteKey = key.encode("utf-8")
+        byteData = data.encode("utf-8")
+        return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
 
