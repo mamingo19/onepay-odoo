@@ -77,38 +77,41 @@ class OnePayController(http.Controller):
 
         return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
     @staticmethod
-    def _verify_notification_signature(data, tx_sudo):
-        """Verify the notification signature sent by OnePay."""
-        received_signature = data.pop("vpc_SecureHash", None)
-        if not received_signature:
-            _logger.warning("Received notification with missing signature.")
-            raise Forbidden()
+    def _verify_notification_signature(self, notification_data):
+        """Verify the notification signature from OnePay."""
+        received_signature = notification_data.get('vpc_SecureHash')
+        assert received_signature, "Missing vpc_SecureHash in the notification data"
 
-        # Ensure the correct field is used to fetch the hash secret
-        merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
-        hmac_key = bytes.fromhex(merchant_hash_code)
+        # Sort parameters and generate the string to hash
+        params_sorted = self.sort_param(notification_data)
+        string_to_hash = self.generate_string_to_hash(params_sorted)
         
-        # Create the signing string
-        sorted_data = sorted(data.items())
-        signing_string = ""
-        for key, value in sorted_data:
-            if key.startswith("vpc_"):
-                signing_string += f"{key}={quote_plus(str(value))}&"
-        signing_string = signing_string.rstrip('&')
+        _logger.debug("String to hash: %s", string_to_hash)
 
         # Generate the expected signature
-        expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
+        expected_signature = self.generate_secure_hash(string_to_hash, self.provider_id.onepay_secret_key)
+        
+        _logger.debug("Expected signature: %s", expected_signature)
+        _logger.debug("Received signature: %s", received_signature)
 
-        # Log the received and expected signatures for debugging
-        _logger.info("Received signature: %s", received_signature)
-        _logger.info("Expected signature: %s", expected_signature)
-        _logger.info("Signing string: %s", signing_string)
-        _logger.info("Merchant hash code: %s", merchant_hash_code)
-
-        # Compare the received signature with the expected signature
-        if not hmac.compare_digest(received_signature.upper(), expected_signature):
-            _logger.warning("Received notification with invalid signature.")
-            raise Forbidden()
+        # Compare the received signature with the expected one
+        if received_signature != expected_signature:
+            _logger.error("Invalid signature! Received: %s, Expected: %s", received_signature, expected_signature)
+            return False
+        
+        return True
+        
+    @staticmethod
+    def generate_string_to_hash(params_sorted):
+        string_to_hash = ""
+        for key, value in params_sorted.items():
+            if key.startswith("vpc_") and key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
+                value_str = str(value)
+                if value_str:
+                    if string_to_hash:
+                        string_to_hash += "&"
+                    string_to_hash += f"{key}={value_str}"
+        return string_to_hash
 
     @staticmethod
     def _get_error_message(response_code):
