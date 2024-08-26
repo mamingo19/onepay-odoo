@@ -15,7 +15,7 @@ Clone the Repository:
 
 bash
 Copy code
-git clone https://github.com/mamingo19/onepay-odoo.git
+"git clone https://github.com/mamingo19/onepay-odoo.git"
 Copy the Module to Your Odoo Addons Directory:
 
 Move the onepay directory into your Odoo addons directory.
