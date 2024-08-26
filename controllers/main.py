@@ -44,61 +44,50 @@ class OnePayController(http.Controller):
         save_session=False,
     )
     def onepay_callback(self, **data):
-        """Process the callback data sent by OnePay to the specified URL."""
-        _logger.info("Callback received from OnePay with data:\n%s", pprint.pformat(data))
+        """Handle the callback from OnePay."""
+        _logger.info(f"Received callback data: {data}")
 
-        try:
-            # Fetch the transaction using the provided data
-            tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data("onepay", data)
+        # Ensure `data` is a dictionary and contains all the necessary information
+        notification_data = dict(data)  # Converts the received parameters into a dictionary
 
-            # Verify the signature
-            self._verify_notification_signature(data, tx_sudo)
+        # Find the transaction based on the received data
+        tx_sudo = request.env['payment.transaction'].sudo()._get_tx_from_notification_data('onepay', notification_data)
 
-            # Handle the notification data
-            tx_sudo._handle_notification_data("onepay", data)
-        except Forbidden:
-            _logger.warning("Forbidden error during signature verification", exc_info=True)
-            return request.make_json_response({"RspCode": "97", "Message": "Invalid Checksum"})
-        except ValidationError:
-            _logger.warning("Validation error during callback data processing", exc_info=True)
-            return request.make_json_response({"RspCode": "01", "Message": "Order Not Found"})
-
-        if tx_sudo.state in ["done", "cancel", "error"]:
-            return request.make_json_response({"RspCode": "02", "Message": "Order already confirmed"})
-
-        response_code = data.get("vpc_TxnResponseCode")
-        _logger.info("Transaction response code: %s", response_code)
-
-        if response_code == "0":
-            tx_sudo._set_done()
-        else:
-            error_message = self._get_error_message(response_code)
-            tx_sudo._set_error(f"OnePay: {error_message}")
-
-        return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
+        # Verify the signature
+        if not self._verify_notification_signature(notification_data, tx_sudo):
+            _logger.error("OnePay: Invalid signature.")
+            return request.redirect('/payment/process/failed')
+        
+        # Process the payment notification
+        tx_sudo._process_notification_data(notification_data)
+        return request.redirect('/payment/process/success')
+    
     @staticmethod
-    def _verify_notification_signature(self, notification_data):
+    def _verify_notification_signature(self, notification_data, tx):
         """Verify the notification signature from OnePay."""
+        # Extract the received signature from the notification data dictionary
         received_signature = notification_data.get('vpc_SecureHash')
-        assert received_signature, "Missing vpc_SecureHash in the notification data"
+        if not received_signature:
+            _logger.error("OnePay: Missing vpc_SecureHash in the notification data")
+            return False
 
         # Sort parameters and generate the string to hash
-        params_sorted = self.sort_param(notification_data)
-        string_to_hash = self.generate_string_to_hash(params_sorted)
-        
+        params_sorted = tx.sort_param(notification_data)
+        string_to_hash = tx.generate_string_to_hash(params_sorted)
+
         _logger.debug("String to hash: %s", string_to_hash)
 
         # Generate the expected signature
-        expected_signature = self.generate_secure_hash(string_to_hash, self.provider_id.onepay_secret_key)
-        
+        expected_signature = tx.generate_secure_hash(string_to_hash, tx.provider_id.onepay_secret_key)
+
         _logger.debug("Expected signature: %s", expected_signature)
         _logger.debug("Received signature: %s", received_signature)
 
         # Compare the received signature with the expected one
         if received_signature != expected_signature:
-            _logger.error("Invalid signature! Received: %s, Expected: %s", received_signature, expected_signature)
+            _logger.error("OnePay: Invalid signature! Received: %s, Expected: %s", received_signature, expected_signature)
             return False
-        
+
         return True
         
     @staticmethod
