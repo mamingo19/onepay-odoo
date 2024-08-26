@@ -74,7 +74,7 @@ Create a Pull Request:
 Go to the main repository and create a pull request from your feature branch.
 
 License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the Darwind License. See the LICENSE file for details.
 
 Contact
 For any questions or support, please open an issue on the GitHub repository or contact the repository maintainer.
