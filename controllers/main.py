@@ -96,6 +96,10 @@ class OnePayController(http.Controller):
         return True
 
     @staticmethod
+    def sort_param(params):
+        return dict(sorted(params.items()))
+    
+    @staticmethod
     def generate_string_to_hash(params_sorted):
         string_to_hash = ""
         for key, value in params_sorted.items():
