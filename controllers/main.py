@@ -84,21 +84,14 @@ class OnePayController(http.Controller):
         if not received_signature:
             _logger.warning("Received notification with missing signature.")
             raise Forbidden()
-
-        # Ensure the correct field is used to fetch the hash secret
-        merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
-        hmac_key = bytes.fromhex(merchant_hash_code)
         
-        # Create the signing string
-        sorted_data = sorted(data.items())
-        signing_string = ""
-        for key, value in sorted_data:
-            if key.startswith("vpc_"):
-                signing_string += f"{key}={quote_plus(str(value))}&"
-        signing_string = signing_string.rstrip('&')
+        merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
+
+        sorted_data = tx_sudo.sort_param(data)
+        signing_string = tx_sudo.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
-        expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha256).hexdigest().upper()
+        expected_signature = tx_sudo.generate_secure_hash(signing_string, merchant_hash_code)
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
@@ -110,6 +103,37 @@ class OnePayController(http.Controller):
         if not hmac.compare_digest(received_signature.upper(), expected_signature):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
+        
+    @staticmethod
+    def sort_param(params):
+        return dict(sorted(params.items()))
+
+    @staticmethod
+    def generate_string_to_hash(params_sorted):
+        string_to_hash = ""
+        for key, value in params_sorted.items():
+            prefix_key = key[:4]
+            if prefix_key in ["vpc_", "user"]:
+                if key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
+                    value_str = str(value)
+                    if value_str:
+                        if string_to_hash:
+                            string_to_hash += "&"
+                        string_to_hash += f"{key}={value_str}"
+        return string_to_hash
+
+    @staticmethod
+    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str):
+        return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
+
+    @staticmethod
+    def vpc_auth(msg, key):
+        vpc_key = bytes.fromhex(key)
+        return OnePayController.hmac_sha256(vpc_key, msg).hex().upper()
+
+    @staticmethod
+    def hmac_sha256(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
 
     @staticmethod
     def _get_error_message(response_code):
