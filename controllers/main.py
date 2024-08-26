@@ -86,7 +86,7 @@ class OnePayController(http.Controller):
 
         # Ensure the correct field is used to fetch the hash secret
         # Example field name is 'onepay_hash_code'; adjust accordingly
-        merchant_hash_code = tx_sudo.provider_id.onepay_hash_code
+        merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
         hmac_key = bytes.fromhex(merchant_hash_code)
         
         # Create the signing string
