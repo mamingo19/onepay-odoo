@@ -43,6 +43,7 @@ class OnePayController(http.Controller):
         csrf=False,
         save_session=False,
     )
+
     def onepay_callback(self, **data):
         """Handle the callback from OnePay."""
         _logger.info(f"Received callback data: {data}")
@@ -62,7 +63,6 @@ class OnePayController(http.Controller):
         tx_sudo._process_notification_data(notification_data)
         return request.redirect('/payment/process/success')
     
-    @staticmethod
     def _verify_notification_signature(self, notification_data, tx):
         """Verify the notification signature from OnePay."""
         # Extract the received signature from the notification data dictionary
@@ -89,6 +89,7 @@ class OnePayController(http.Controller):
             return False
 
         return True
+
         
     @staticmethod
     def generate_string_to_hash(params_sorted):
