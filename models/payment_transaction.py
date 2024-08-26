@@ -47,9 +47,6 @@ class PaymentTransaction(models.Model):
             "AgainLink": urls.url_join(base_url, "/shop/payment"),
             "Title": "Trip Payment",
         }
-
-        _logger.info(f"Callback URL: {params['vpc_CallbackURL']}")
-
         payment_link_data = self.provider_id._get_payment_url(
             params=params, secret_key=self.provider_id.onepay_secret_key
         )
