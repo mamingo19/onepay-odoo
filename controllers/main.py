@@ -47,7 +47,7 @@ class OnePayController(http.Controller):
             self._verify_notification_signature(data)
 
             # Handle the notification data
-            tx_sudo._handle_notification_data("onepay", data)
+            tx_sudo._process_notification_data(data)
         except Forbidden:
             _logger.warning("Forbidden error during signature verification", exc_info=True)
             return request.make_json_response({"RspCode": "97", "Message": "Invalid Checksum"})
@@ -82,7 +82,7 @@ class OnePayController(http.Controller):
         _logger.debug("String to hash: %s", string_to_hash)
 
         # Generate the expected signature
-        onepay_secret_key = request.env["payment.provider"].sudo().search([('provider', '=', 'onepay')], limit=1).onepay_secret_key
+        onepay_secret_key = request.env["payment.provider"].sudo().search([('code', '=', 'onepay')], limit=1).onepay_secret_key
         expected_signature = OnePayController.generate_secure_hash(string_to_hash, onepay_secret_key)
         
         _logger.debug("Expected signature: %s", expected_signature)
@@ -107,30 +107,30 @@ class OnePayController(http.Controller):
             if (prefix_key == "vpc_" or prefix_key == "user"):
                 if (key != "vpc_SecureHashType" and key != "vpc_SecureHash"):
                     value_str = str(value)
-                    if (len(value_str) > 0):
-                        if (len(string_to_hash) > 0):
+                    if len(value_str) > 0:
+                        if len(string_to_hash) > 0:
                             string_to_hash += "&"
-                        string_to_hash += key + "=" + value_str
+                        string_to_hash += f"{key}={value_str}"
         return string_to_hash
     
     @staticmethod
-    def generate_secure_hash(string_to_hash:str, onepay_secret_key:str):
-        return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
-    
-    @staticmethod
-    def vpc_auth(msg, key):
-        vpc_key = bytes.fromhex(key)
-        return OnePayController.hmac_sha256(vpc_key, msg).hex().upper()
-    
-    @staticmethod
-    def hmac_sha256(key, msg):
-        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+    def generate_secure_hash(string_to_hash, onepay_secret_key):
+        return hmac.new(
+            bytes.fromhex(onepay_secret_key), 
+            string_to_hash.encode('utf-8'), 
+            hashlib.sha256
+        ).hexdigest().upper()
     
     @staticmethod
     def _get_error_message(response_code):
+        """Provide a friendly error message based on the response code."""
         error_messages = {
-            "1": _("Unspecified failure in authorization."),
-            "2": _("Card Issuer declined to authorize the transaction."),
-            # Add other error codes and their corresponding messages as needed
+            "1": "Transaction was not processed.",
+            "2": "Transaction was declined.",
+            "3": "Transaction was reversed.",
+            "4": "Transaction is being processed.",
+            "5": "Transaction is in process.",
+            "6": "Transaction is pending.",
+            "7": "Transaction was approved.",
         }
-        return error_messages.get(response_code, _("Unspecified failure."))
+        return error_messages.get(response_code, "Unknown error")
