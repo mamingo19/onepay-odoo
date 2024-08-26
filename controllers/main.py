@@ -85,8 +85,7 @@ class OnePayController(http.Controller):
             raise Forbidden()
 
         # Ensure the correct field is used to fetch the hash secret
-        # Example field name is 'onepay_hash_code'; adjust accordingly
-        merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
+        merchant_hash_code = tx_sudo.provider_id.onepay_hash_code
         hmac_key = bytes.fromhex(merchant_hash_code)
         
         # Create the signing string
@@ -100,7 +99,11 @@ class OnePayController(http.Controller):
         # Generate the expected signature
         expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
 
+        # Log the received and expected signatures for debugging
+        _logger.info("Received signature: %s", received_signature)
         _logger.info("Expected signature: %s", expected_signature)
+        _logger.info("Signing string: %s", signing_string)
+        _logger.info("Merchant hash code: %s", merchant_hash_code)
 
         # Compare the received signature with the expected signature
         if not hmac.compare_digest(received_signature.upper(), expected_signature):
