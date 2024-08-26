@@ -91,7 +91,7 @@ class OnePayController(http.Controller):
         signing_string = self.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
-        expected_signature = self.generate_secure_hash(signing_string, merchant_hash_code)
+        expected_signature = self.generate_secure_hash(signing_string, merchant_hash_code,tx_sudo)
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
