@@ -3,6 +3,6 @@
   <template id="redirect_form">
     <!-- Create a hidden input field to hold the value of api_url -->
     <!-- The input's value is dynamically set to the value of "api_url" -->
-    <form t-att-action="api_url" method ="GET"/>
+    <form t-att-action="api_url" method ="POST"/>
   </template>
 </odoo>
