@@ -3,7 +3,10 @@ import hmac
 import logging
 import pprint
 import urllib.parse
+import base64
+import time 
 
+from urllib.parse import quote_plus
 from werkzeug.exceptions import Forbidden
 from odoo import _, http
 from odoo.exceptions import ValidationError
@@ -206,56 +209,42 @@ class OnePayController(http.Controller):
             {"RspCode": "00", "Message": "Confirm Success"}
         )
 
-    @staticmethod
     def _verify_notification_signature(data, tx_sudo):
-        """Check that the received signature matches the expected one.
-        * The signature in the payment link and the signature in the notification data are different.
+        """Verify the notification signature sent by OnePay.
 
-        :param dict received_signature: The signature received with the notification data.
-        :param recordset tx_sudo: The sudoed transaction referenced by the notification data, as a
-                                    `payment.transaction` record.
+        This function compares the received signature with the one generated using the
+        same logic as `create_request_signature_ita`.
 
+        :param dict data: The notification data received.
+        :param recordset tx_sudo: The sudoed transaction referenced by the notification data.
         :return: None
         :raise Forbidden: If the signatures don't match.
         """
-        # Check if data is empty.
-        if not data:
-            _logger.warning("Received notification with missing data.")
+        # Extract and remove the signature from the data to verify
+        received_signature = data.pop("vnp_SecureHash", None)
+        if not received_signature:
+            _logger.warning("Received notification with missing signature.")
             raise Forbidden()
 
-        receive_signature = data.get("vnp_SecureHash")
+        # Sort the data by key to generate the expected signature string
+        sorted_data = sorted(data.items())
+        signing_string = ""
+        for key, value in sorted_data:
+            if key.startswith("vnp_"):
+                signing_string += f"{key}={quote_plus(str(value))}&"
+        
+        # Remove trailing '&' from the signing string
+        signing_string = signing_string.rstrip('&')
 
-        # Remove the signature from the data to verify.
-        if data.get("vnp_SecureHash"):
-            data.pop("vnp_SecureHash")
-        if data.get("vnp_SecureHashType"):
-            data.pop("vnp_SecureHashType")
+        # Generate the expected signature
+        merchant_hash_code = tx_sudo.provider_id.onepay_hash_secret
+        hmac_key = bytes.fromhex(merchant_hash_code)
+        expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
 
-        # Sort the data by key to generate the expected signature.
-        inputData = sorted(data.items())
-        hasData = ""
-        seq = 0
-        for key, val in inputData:
-            if str(key).startswith("vnp_"):
-                if seq == 1:
-                    hasData = (
-                        hasData
-                        + "&"
-                        + str(key)
-                        + "="
-                        + urllib.parse.quote_plus(str(val))
-                    )
-                else:
-                    seq = 1
-                    hasData = str(key) + "=" + urllib.parse.quote_plus(str(val))
+        _logger.info("Expected signature: %s", expected_signature)
 
-        # Generate the expected signature.
-        expected_signature = OnePayController.__hmacsha512(
-            tx_sudo.provider_id.onepay_hash_secret, hasData
-        )
-
-        # Compare the received signature with the expected signature.
-        if not hmac.compare_digest(receive_signature, expected_signature):
+        # Compare the received signature with the expected signature
+        if not hmac.compare_digest(received_signature.upper(), expected_signature):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
 
