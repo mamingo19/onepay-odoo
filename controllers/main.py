@@ -98,7 +98,7 @@ class OnePayController(http.Controller):
         signing_string = signing_string.rstrip('&')
 
         # Generate the expected signature
-        expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
+        expected_signature = base64.b64encode(hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).digest()).decode("utf-8").upper()
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
