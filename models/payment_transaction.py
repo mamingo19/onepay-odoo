@@ -1,36 +1,33 @@
+from odoo import models, _
+from odoo.exceptions import ValidationError
+from odoo.addons.onepay_payment.controllers.main import OnePayController
+
 import logging
 import socket
 import requests
 from datetime import datetime
-
 from werkzeug import urls
-from odoo import models, _
-from odoo.exceptions import ValidationError
-from odoo.addons.onepay_payment.controllers.main import OnePayController
 
 _logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     _inherit = "payment.transaction"
     
+    
     BASE_URL = "https://mtf.onepay.vn/paygate/vpcpay.op?"
 
     def _get_specific_rendering_values(self, processing_values):
-        """Override to return OnePay-specific rendering values.
-
-        :param dict processing_values: The generic and specific processing values of the transaction
-        :return: The dict of provider-specific processing values.
-        :rtype: dict
-        """
+        """Override to return OnePay-specific rendering values."""
         self.ensure_one()
         res = super()._get_specific_rendering_values(processing_values)
         if self.provider_code != "onepay":
             return res
 
         # Initiate the payment and retrieve the payment link data.
-        base_url = self.provider_id.get_base_url()
+        base_url = self.provider_id.get_base_url().replace("http://", "https://", 1)
         int_amount = int(self.amount)
 
+        # Generate IP and timestamp for vpc_TicketNo
         ip_address = socket.gethostbyname(socket.gethostname())
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         vpc_ticket_no = f"{ip_address}-{timestamp}"
@@ -40,7 +37,7 @@ class PaymentTransaction(models.Model):
             "vpc_Command": "pay",
             "vpc_AccessCode": self.provider_id.onepay_access_code,
             "vpc_Merchant": self.provider_id.onepay_merchant_id,
-            "vpc_Amount": int_amount * 100,
+            "vpc_Amount": int_amount * 100,  # Amount in smallest currency unit
             "vpc_Currency": "VND",
             "vpc_ReturnURL": urls.url_join(base_url, OnePayController._return_url),
             "vpc_OrderInfo": f"Order: {self.reference}",
@@ -49,10 +46,11 @@ class PaymentTransaction(models.Model):
             "vpc_TicketNo": vpc_ticket_no,
             "AgainLink": urls.url_join(base_url, "/shop/payment"),
             "Title": "Trip Payment",
-            "vpc_CallbackURL": urls.url_join(base_url.replace("http://", "https://", 1), '/payment/onepay/callback')  # URL callback
-            
+            # Construct callback URL with robust handling
+            "vpc_CallbackURL": urls.url_join(base_url, OnePayController._callback_url),
         }
-        _logger.info(urls.url_join(base_url, '/payment/onepay/callback'))
+
+        _logger.info(f"Callback URL: {params['vpc_CallbackURL']}")
 
         payment_link_data = self.provider_id._get_payment_url(
             params=params, secret_key=self.provider_id.onepay_secret_key
@@ -62,17 +60,15 @@ class PaymentTransaction(models.Model):
             'api_url': payment_link_data
         }
         return rendering_values
+    
+    def _send_http_request(self, merchant_param):
+        """Send HTTP request to OnePay with dynamic merchant parameters."""
+        BASE_URL = self.provider_id.get_base_url()
+        response = requests.get(BASE_URL, params=merchant_param, allow_redirects=False)
+        return response.headers.get('location')
 
     def _get_tx_from_notification_data(self, provider_code, notification_data):
-        """Override to find the transaction based on OnePay data.
-
-        :param str provider_code: The code of the provider that handled the transaction.
-        :param dict notification_data: The notification data sent by the provider.
-        :return: The transaction if found.
-        :rtype: recordset of payment.transaction
-        :raise ValidationError: If inconsistent data were received.
-        :raise ValidationError: If the data match no transaction.
-        """
+        """Override to find the transaction based on OnePay data."""
         tx = super()._get_tx_from_notification_data(provider_code, notification_data)
         if provider_code != "onepay" or len(tx) == 1:
             return tx
@@ -93,14 +89,7 @@ class PaymentTransaction(models.Model):
         return tx
 
     def _process_notification_data(self, notification_data):
-        """Override to process the transaction based on OnePay data.
-
-        Note: self.ensure_one()
-
-        :param dict notification_data: The notification data sent by the provider.
-        :return: None
-        :raise ValidationError: If inconsistent data were received.
-        """
+        """Override to process the transaction based on OnePay data."""
         self.ensure_one()
         super()._process_notification_data(notification_data)
         if self.provider_code != "onepay":
