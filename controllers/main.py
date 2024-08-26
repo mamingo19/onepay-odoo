@@ -38,7 +38,7 @@ class OnePayController(http.Controller):
     @http.route(
         _callback_url,
         type="http",
-        methods=["POST"],
+        methods=["GET"], #test "GET"
         auth="public",
         csrf=False,
         save_session=False,
