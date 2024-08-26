@@ -105,14 +105,29 @@ class OnePayController(http.Controller):
     def generate_string_to_hash(params_sorted):
         string_to_hash = ""
         for key, value in params_sorted.items():
-            if key.startswith("vpc_") and key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
-                value_str = str(value)
-                if value_str:
-                    if string_to_hash:
-                        string_to_hash += "&"
-                    string_to_hash += f"{key}={value_str}"
+            prefix_key = key[0:4]
+            if (prefix_key == "vpc_" or prefix_key == "user"):
+                if (key != "vpc_SecureHashType" and key != "vpc_SecureHash"):
+                    value_str = str(value)
+                    if (len(value_str) > 0):
+                        if (len(string_to_hash) > 0):
+                            string_to_hash += "&"
+                        string_to_hash += key + "=" + value_str
         return string_to_hash
-
+    
+    @staticmethod
+    def generate_secure_hash(string_to_hash:str, onepay_secret_key:str):
+        return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
+    
+    @staticmethod
+    def vpc_auth(msg, key):
+        vpc_key = bytes.fromhex(key)
+        return OnePayController.hmac_sha256(vpc_key, msg).hex().upper()
+    
+    @staticmethod
+    def hmac_sha256(key, msg):
+        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+    
     @staticmethod
     def _get_error_message(response_code):
         error_messages = {
