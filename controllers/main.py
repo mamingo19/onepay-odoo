@@ -38,7 +38,7 @@ class OnePayController(http.Controller):
     @http.route(
         _callback_url,
         type="http",
-        methods=["GET"], #test "GET"
+        methods=["GET"],  # Adjust this if OnePay uses POST
         auth="public",
         csrf=False,
         save_session=False,
@@ -48,8 +48,13 @@ class OnePayController(http.Controller):
         _logger.info("Callback received from OnePay with data:\n%s", pprint.pformat(data))
 
         try:
+            # Fetch the transaction using the provided data
             tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data("onepay", data)
+
+            # Verify the signature
             self._verify_notification_signature(data, tx_sudo)
+
+            # Handle the notification data
             tx_sudo._handle_notification_data("onepay", data)
         except Forbidden:
             _logger.warning("Forbidden error during signature verification", exc_info=True)
@@ -71,14 +76,13 @@ class OnePayController(http.Controller):
             tx_sudo._set_error(f"OnePay: {error_message}")
 
         return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
-
     @staticmethod
-    def _verify_notification_signature(self, data, tx_sudo):
+    def _verify_notification_signature(data, tx_sudo):
         """Verify the notification signature sent by OnePay."""
         received_signature = data.pop("vpc_SecureHash", None)
         if not received_signature:
             _logger.warning("Received notification with missing signature.")
-            raise Forbidden()
+            raise Forbidden("Missing signature")
 
         sorted_data = sorted(data.items())
         signing_string = ""
@@ -87,6 +91,7 @@ class OnePayController(http.Controller):
                 signing_string += f"{key}={quote_plus(str(value))}&"
         signing_string = signing_string.rstrip('&')
 
+        # Retrieve the merchant hash code from tx_sudo
         merchant_hash_code = tx_sudo.provider_id.onepay_hash_secret
         hmac_key = bytes.fromhex(merchant_hash_code)
         expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
@@ -95,7 +100,7 @@ class OnePayController(http.Controller):
 
         if not hmac.compare_digest(received_signature.upper(), expected_signature):
             _logger.warning("Received notification with invalid signature.")
-            raise Forbidden()
+            raise Forbidden("Invalid signature")
 
 
     @staticmethod
