@@ -46,8 +46,6 @@ class PaymentTransaction(models.Model):
             "vpc_TicketNo": vpc_ticket_no,
             "AgainLink": urls.url_join(base_url, "/shop/payment"),
             "Title": "Trip Payment",
-            # Construct callback URL with robust handling
-            "vpc_CallbackURL": urls.url_join(base_url, OnePayController._callback_url),
         }
 
         _logger.info(f"Callback URL: {params['vpc_CallbackURL']}")
