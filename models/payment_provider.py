@@ -1,4 +1,5 @@
 import logging
+import requests
 import hmac
 import hashlib
 import urllib.parse
@@ -27,14 +28,18 @@ class PaymentProviderOnePay(models.Model):
     )
 
     @api.model
-    def _get_compatible_providers(self, *args, currency_id=None, is_validation=False, **kwargs):
+    def _get_compatible_providers(
+        self, *args, currency_id=None, is_validation=False, **kwargs
+    ):
         providers = super()._get_compatible_providers(
             *args, currency_id=currency_id, is_validation=is_validation, **kwargs
         )
 
         currency = self.env["res.currency"].browse(currency_id).exists()
 
-        if (currency and currency.name not in const.SUPPORTED_CURRENCIES) or is_validation:
+        if (
+            currency and currency.name not in const.SUPPORTED_CURRENCIES
+        ) or is_validation:
             providers = providers.filtered(lambda p: p.code != "onepay")
 
         return providers
@@ -59,7 +64,7 @@ class PaymentProviderOnePay(models.Model):
         query_string = urllib.parse.urlencode(params_sorted)
         payment_url = f"https://mtf.onepay.vn/paygate/vpcpay.op?{query_string}"
         
-        _logger.info(f"Payment URL: {payment_url}")
+        print(f"Print out this for me: {payment_url}")
         return payment_url
 
     @staticmethod
@@ -74,14 +79,15 @@ class PaymentProviderOnePay(models.Model):
             if (prefix_key == "vpc_" or prefix_key == "user"):
                 if (key != "vpc_SecureHashType" and key != "vpc_SecureHash"):
                     value_str = str(value)
-                    if len(value_str) > 0:
-                        if len(string_to_hash) > 0:
+                    if (len(value_str) > 0):
+                        if (len(string_to_hash) > 0):
                             string_to_hash += "&"
-                        string_to_hash += f"{key}={value_str}"
+                        string_to_hash += key + "=" + value_str
         return string_to_hash
 
+
     @staticmethod
-    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str):
+    def generate_secure_hash(string_to_hash:str, onepay_secret_key:str):
         return PaymentProviderOnePay.vpc_auth(string_to_hash, onepay_secret_key)
 
     @staticmethod
