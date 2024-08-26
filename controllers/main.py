@@ -36,21 +36,15 @@ class OnePayController(http.Controller):
         return request.redirect("/payment/status")
     
     @http.route(
-    _callback_url,
-    type="http",
-    methods=["POST"],
-    auth="public",
-    csrf=False,
-    save_session=False,
+        _callback_url,
+        type="http",
+        methods=["POST"],
+        auth="public",
+        csrf=False,
+        save_session=False,
     )
     def onepay_callback(self, **data):
-        """Process the callback data sent by OnePay to the specified URL.
-        
-        This function handles the callback URL processing for OnePay payments.
-        
-        :param dict data: The callback data received from OnePay.
-        :return: A response to acknowledge receipt of the callback.
-        """
+        """Process the callback data sent by OnePay to the specified URL."""
         
         _logger.info("Callback received from OnePay with data:\n%s", pprint.pformat(data))
         
@@ -90,25 +84,9 @@ class OnePayController(http.Controller):
         return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
 
     @staticmethod
-    def _get_error_message(response_code):
-        error_messages = {
-            "1": _("Unspecified failure in authorization."),
-            "2": _("Card Issuer declined to authorize the transaction."),
-            # Add other error codes and their corresponding messages as needed
-        }
-        return error_messages.get(response_code, _("Unspecified failure."))
-    @staticmethod
-    def _verify_notification_signature(self, data, tx_sudo):
-        """Verify the notification signature sent by OnePay.
+    def _verify_notification_signature(data, tx_sudo):
+        """Verify the notification signature sent by OnePay."""
 
-        This function compares the received signature with the one generated using the
-        same logic as `create_request_signature_ita`.
-
-        :param dict data: The notification data received.
-        :param recordset tx_sudo: The sudoed transaction referenced by the notification data.
-        :return: None
-        :raise Forbidden: If the signatures don't match.
-        """
         # Extract and remove the signature from the data to verify
         received_signature = data.pop("vpc_SecureHash", None)
         if not received_signature:
@@ -137,6 +115,15 @@ class OnePayController(http.Controller):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
 
+    @staticmethod
+    def _get_error_message(response_code):
+        error_messages = {
+            "1": _("Unspecified failure in authorization."),
+            "2": _("Card Issuer declined to authorize the transaction."),
+            # Add other error codes and their corresponding messages as needed
+        }
+        return error_messages.get(response_code, _("Unspecified failure."))
+    
     @http.route(
         _ipn_url,
         type="http",
