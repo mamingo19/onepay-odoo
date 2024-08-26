@@ -82,8 +82,14 @@ class OnePayController(http.Controller):
         received_signature = data.pop("vpc_SecureHash", None)
         if not received_signature:
             _logger.warning("Received notification with missing signature.")
-            raise Forbidden("Missing signature")
+            raise Forbidden()
 
+        # Ensure the correct field is used to fetch the hash secret
+        # Example field name is 'onepay_hash_code'; adjust accordingly
+        merchant_hash_code = tx_sudo.provider_id.onepay_hash_code
+        hmac_key = bytes.fromhex(merchant_hash_code)
+        
+        # Create the signing string
         sorted_data = sorted(data.items())
         signing_string = ""
         for key, value in sorted_data:
@@ -91,17 +97,15 @@ class OnePayController(http.Controller):
                 signing_string += f"{key}={quote_plus(str(value))}&"
         signing_string = signing_string.rstrip('&')
 
-        # Retrieve the merchant hash code from tx_sudo
-        merchant_hash_code = tx_sudo.provider_id.onepay_hash_secret
-        hmac_key = bytes.fromhex(merchant_hash_code)
+        # Generate the expected signature
         expected_signature = hmac.new(hmac_key, signing_string.encode("utf-8"), hashlib.sha512).hexdigest().upper()
 
         _logger.info("Expected signature: %s", expected_signature)
 
+        # Compare the received signature with the expected signature
         if not hmac.compare_digest(received_signature.upper(), expected_signature):
             _logger.warning("Received notification with invalid signature.")
-            raise Forbidden("Invalid signature")
-
+            raise Forbidden()
 
     @staticmethod
     def _get_error_message(response_code):
