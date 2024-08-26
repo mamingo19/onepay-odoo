@@ -1,15 +1,15 @@
 {
-    'name': 'OnePay Payment Integration',
+    'name': 'OnePay Payment',
     'version': '1.0',
     'category': 'Payment',
     'sequence': 1,
     'summary': 'Integration with OnePay payment gateway',
     'description': 'Module to integrate OnePay payment gateway with Odoo',
-    'author': 'Your Name',
+    'author': 'Darwind',
     'depends': ['base','payment'],
     'data': [
-        'views/payment_onepay_view.xml',
         'views/payment_onepay_template.xml',
+        'views/payment_onepay_view.xml',
         'data/payment_provider_data.xml',
         'data/payment_method_data.xml',
         ],   
