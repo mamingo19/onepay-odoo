@@ -78,7 +78,7 @@ class OnePayController(http.Controller):
         return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
     
     @staticmethod
-    def _verify_notification_signature(data, tx_sudo):
+    def _verify_notification_signature(self, data, tx_sudo):
         """Verify the notification signature sent by OnePay."""
         received_signature = data.pop("vpc_SecureHash", None)
         if not received_signature:
@@ -87,11 +87,11 @@ class OnePayController(http.Controller):
         
         merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
 
-        sorted_data = tx_sudo.sort_param(data)
-        signing_string = tx_sudo.generate_string_to_hash(sorted_data)
+        sorted_data = self.sort_param(data)
+        signing_string = self.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
-        expected_signature = tx_sudo.generate_secure_hash(signing_string, merchant_hash_code)
+        expected_signature = self.generate_secure_hash(signing_string, merchant_hash_code)
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
