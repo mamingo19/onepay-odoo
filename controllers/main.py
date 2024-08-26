@@ -123,7 +123,8 @@ class OnePayController(http.Controller):
         return string_to_hash
 
     @staticmethod
-    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str):
+    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str, tx_sudo):
+        onepay_secret_key = tx_sudo.provider_id.onepay_secret_key
         return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
 
     @staticmethod
