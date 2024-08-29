@@ -87,7 +87,7 @@ class OnePayController(http.Controller):
         merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
 
         sorted_data = OnePayController.sort_param(data)
-        signing_string = OnePayController.generate_string_to_hash(data)
+        signing_string = OnePayController.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
         expected_signature = OnePayController.generate_secure_hash(signing_string, merchant_hash_code)
