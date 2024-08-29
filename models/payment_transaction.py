@@ -3,6 +3,7 @@ from odoo.exceptions import ValidationError
 from odoo.addons.onepay_payment.controllers.main import OnePayController
 from odoo import models, fields
 
+
 import logging
 import socket
 import requests
@@ -13,12 +14,11 @@ _logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     _inherit = "payment.transaction"
-
     BASE_URL = "https://mtf.onepay.vn/paygate/vpcpay.op?"
 
     onepay_query_status = fields.Boolean(string="OnePay Query Status", default=False)
     onepay_query_start_time = fields.Datetime(string="OnePay Query Start Time")
-
+    
     def _get_specific_rendering_values(self, processing_values):
         """Override to return OnePay-specific rendering values."""
         self.ensure_one()
@@ -63,6 +63,64 @@ class PaymentTransaction(models.Model):
             'api_url': payment_link_data
         }
         return rendering_values
+    
+    def _send_http_request(self, merchant_param):
+        """Send HTTP request to OnePay with dynamic merchant parameters."""
+        BASE_URL = self.provider_id.get_base_url()
+        response = requests.get(BASE_URL, params=merchant_param, allow_redirects=False)
+        return response.headers.get('location')
+
+    def _get_tx_from_notification_data(self, provider_code, notification_data):
+        """Override to find the transaction based on OnePay data."""
+        tx = super()._get_tx_from_notification_data(provider_code, notification_data)
+        if provider_code != "onepay" or len(tx) == 1:
+            return tx
+
+        reference = notification_data.get("vpc_MerchTxnRef")
+        if not reference:
+            raise ValidationError(
+                "OnePay: " + _("Received data with missing reference.")
+            )
+
+        tx = self.search(
+            [("reference", "=", reference), ("provider_code", "=", "onepay")]
+        )
+        if not tx:
+            raise ValidationError(
+                "OnePay: " + _("No transaction found matching reference %s.", reference)
+            )
+        return tx
+
+    def _process_notification_data(self, notification_data):
+        """Override to process the transaction based on OnePay data."""
+        self.ensure_one()
+        super()._process_notification_data(notification_data)
+        if self.provider_code != "onepay":
+            return
+
+        if not notification_data:
+            self._set_canceled(state_message=_("The customer left the payment page."))
+            return
+
+        amount = notification_data.get("vpc_Amount")
+        assert amount, "OnePay: missing amount"
+        assert (
+            self.currency_id.compare_amounts(float(amount) / 100, self.amount) == 0
+        ), "OnePay: mismatching amounts"
+
+        vpc_txn_ref = notification_data.get("vpc_MerchTxnRef")
+
+        if not vpc_txn_ref:
+            raise ValidationError(
+                "OnePay: " + _("Received data with missing reference.")
+            )
+        self.provider_reference = vpc_txn_ref
+
+        # Force OnePay as the payment method if it exists.
+        self.payment_method_id = (
+            self.env["payment.method"].search([("code", "=", "onepay")], limit=1)
+            or self.payment_method_id
+        )
 
     def _cron_query_onepay_transaction_status(self):
         transactions = self.search([
