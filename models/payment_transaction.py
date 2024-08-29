@@ -10,6 +10,7 @@ import socket
 import requests
 from datetime import datetime
 from werkzeug import urls
+from datetime import timedelta
 
 _logger = logging.getLogger(__name__)
 
@@ -118,11 +119,12 @@ class PaymentTransaction(models.Model):
         )
 
     def _cron_query_onepay_transaction_status(self):
+        fifteen_minutes_ago = fields.Datetime.now() - timedelta(minutes=1)
         transactions = self.search([
             ('provider_code', '=', 'onepay'),
             ('state', '=', 'pending'),
             ('onepay_query_status', '=', False),
-            ('onepay_query_start_time', '>=', fields.Datetime.subtract(fields.Datetime.now(), minutes=15)),
+            ('onepay_query_start_time', '>=', fifteen_minutes_ago),
         ])
         for tx in transactions:
             tx._query_onepay_transaction_status()
@@ -165,16 +167,14 @@ class PaymentTransaction(models.Model):
                 self._set_error(f"OnePay: {error_message}")
 
         # If the transaction is not finalized, schedule the next query
-        if fields.Datetime.now() >= self.onepay_query_start_time + datetime.timedelta(minutes=15):
-            self.onepay_query_status = True
-        else:
+        if fields.Datetime.now() < self.onepay_query_start_time + timedelta(minutes=1) and not self.onepay_query_status:
             self.env['ir.cron'].create({
-                'name': 'Query OnePay Transaction Status',
+                'name': f'Query OnePay Transaction Status for {self.reference}',
                 'model_id': self.env.ref('payment.model_payment_transaction').id,
                 'state': 'code',
-                'code': f'model._query_onepay_transaction_status()',
-                'interval_number': 5,
-                'interval_type': 'minutes',
+                'code': f'model.browse({self.id})._query_onepay_transaction_status()',
+                'interval_number': 15,
+                'interval_type': 'seconds',
                 'numbercall': 1,
-                'nextcall': fields.Datetime.now() + datetime.timedelta(minutes=5),
+                'nextcall': fields.Datetime.now() + timedelta(seconds=15),
             })
