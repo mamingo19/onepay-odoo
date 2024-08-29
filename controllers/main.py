@@ -4,8 +4,11 @@ import logging
 import pprint
 import urllib.parse
 import base64
-import time 
+import datetime
+import time
+import requests
 
+from odoo.addons.onepay_payment.models.payment_provider  import *
 from urllib.parse import quote_plus
 from werkzeug.exceptions import Forbidden
 from odoo import _, http
@@ -29,10 +32,7 @@ class OnePayController(http.Controller):
     )
     def onepay_return_from_checkout(self, **data):
         """No need to handle the data from the return URL because the IPN already handled it."""
-
         _logger.info("Handling redirection from OnePay.")
-
-        # Redirect user to the status page.
         return request.redirect("/payment/status")
     
     @http.route(
@@ -52,7 +52,7 @@ class OnePayController(http.Controller):
             tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data("onepay", data)
 
             # Verify the signature
-            self._verify_notification_signature(self, data, tx_sudo)
+            self._verify_notification_signature(data, tx_sudo)
 
             # Handle the notification data
             tx_sudo._handle_notification_data("onepay", data)
@@ -78,7 +78,7 @@ class OnePayController(http.Controller):
         return request.make_json_response({"RspCode": "00", "Message": "Callback Success"})
     
     @staticmethod
-    def _verify_notification_signature(self, data, tx_sudo):
+    def _verify_notification_signature(data, tx_sudo):
         """Verify the notification signature sent by OnePay."""
         received_signature = data.pop("vpc_SecureHash", None)
         if not received_signature:
@@ -87,11 +87,11 @@ class OnePayController(http.Controller):
         
         merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
 
-        sorted_data = self.sort_param(data)
-        signing_string = self.generate_string_to_hash(sorted_data)
+        sorted_data = OnePayController.sort_param(data)
+        signing_string = OnePayController.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
-        expected_signature = self.generate_secure_hash(signing_string, merchant_hash_code,tx_sudo)
+        expected_signature = OnePayController.generate_secure_hash(signing_string, merchant_hash_code)
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
@@ -104,37 +104,6 @@ class OnePayController(http.Controller):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
         
-    @staticmethod
-    def sort_param(params):
-        return dict(sorted(params.items()))
-
-    @staticmethod
-    def generate_string_to_hash(params_sorted):
-        string_to_hash = ""
-        for key, value in params_sorted.items():
-            prefix_key = key[:4]
-            if prefix_key in ["vpc_", "user"]:
-                if key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
-                    value_str = str(value)
-                    if value_str:
-                        if string_to_hash:
-                            string_to_hash += "&"
-                        string_to_hash += f"{key}={value_str}"
-        return string_to_hash
-
-    @staticmethod
-    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str, tx_sudo):
-        onepay_secret_key = tx_sudo.provider_id.onepay_secret_key
-        return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
-
-    @staticmethod
-    def vpc_auth(msg, key):
-        vpc_key = bytes.fromhex(key)
-        return OnePayController.hmac_sha256(vpc_key, msg).hex().upper()
-
-    @staticmethod
-    def hmac_sha256(key, msg):
-        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
 
     @staticmethod
     def _get_error_message(response_code):
@@ -144,7 +113,7 @@ class OnePayController(http.Controller):
             # Add other error codes and their corresponding messages as needed
         }
         return error_messages.get(response_code, _("Unspecified failure."))
-    
+
     @http.route(
         _ipn_url,
         type="http",
@@ -155,61 +124,36 @@ class OnePayController(http.Controller):
     )
     def onepay_webhook(self, **data):
         """Process the notification data (IPN) sent by OnePay to the webhook.
-
+        
         The "Instant Payment Notification" is a classical webhook notification.
 
         :param dict data: The notification data
         :return: The response to give to OnePay and acknowledge the notification
         """
+        _logger.info("Notification received from OnePay with data:\n%s", pprint.pformat(data))
 
-        _logger.info(
-            "Notification received from OnePay with data:\n%s", pprint.pformat(data)
-        )
         try:
-            tx_sudo = (
-                request.env["payment.transaction"]
-                .sudo()
-                ._get_tx_from_notification_data("onepay", data)
-            )
+            tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data("onepay", data)
             # Verify the signature of the notification data.
-            self._verify_notification_signature(self, data, tx_sudo)
+            self._verify_notification_signature(data, tx_sudo)
             # Handle the notification data
             tx_sudo._handle_notification_data("onepay", data)
         except Forbidden:
-            _logger.warning(
-                "Forbidden error during signature verification",
-                exc_info=True,
-            )
+            _logger.warning("Forbidden error during signature verification", exc_info=True)
             # Set the transaction to error due to invalid signature
             tx_sudo._set_error("OnePay: " + _("Received data with invalid signature."))
-            return request.make_json_response(
-                {"RspCode": "97", "Message": "Invalid Checksum"}
-            )
-
+            return request.make_json_response({"RspCode": "97", "Message": "Invalid Checksum"})
         except AssertionError:
-            _logger.warning(
-                "Assertion error during notification handling",
-                exc_info=True,
-            )
+            _logger.warning("Assertion error during notification handling", exc_info=True)
             tx_sudo._set_error("OnePay: " + _("Received data with invalid amount."))
-            return request.make_json_response(
-                {"RspCode": "04", "Message": "Invalid amount"}
-            )
-
+            return request.make_json_response({"RspCode": "04", "Message": "Invalid amount"})
         except ValidationError:
-            _logger.warning(
-                "Unable to handle the notification data",
-                exc_info=True,
-            )
-            return request.make_json_response(
-                {"RspCode": "01", "Message": "Order Not Found"}
-            )
+            _logger.warning("Unable to handle the notification data", exc_info=True)
+            return request.make_json_response({"RspCode": "01", "Message": "Order Not Found"})
 
         # Check if the transaction has already been processed.
         if tx_sudo.state in ["done", "cancel", "error"]:
-            return request.make_json_response(
-                {"RspCode": "02", "Message": "Order already confirmed"}
-            )
+            return request.make_json_response({"RspCode": "02", "Message": "Order already confirmed"})
 
         response_code = data.get("vpc_TxnResponseCode")
         _logger.info("Transaction response code: %s", response_code)
