@@ -1,6 +1,7 @@
 from odoo import models, _
 from odoo.exceptions import ValidationError
 from odoo.addons.onepay_payment.controllers.main import OnePayController
+from odoo.addons.onepay_payment.models.payment_provider import PaymentProviderOnePay
 from odoo import models, fields
 
 
@@ -63,12 +64,6 @@ class PaymentTransaction(models.Model):
             'api_url': payment_link_data
         }
         return rendering_values
-    
-    def _send_http_request(self, merchant_param):
-        """Send HTTP request to OnePay with dynamic merchant parameters."""
-        BASE_URL = self.provider_id.get_base_url()
-        response = requests.get(BASE_URL, params=merchant_param, allow_redirects=False)
-        return response.headers.get('location')
 
     def _get_tx_from_notification_data(self, provider_code, notification_data):
         """Override to find the transaction based on OnePay data."""
@@ -147,9 +142,9 @@ class PaymentTransaction(models.Model):
         }
 
         # Generate the secure hash
-        params_sorted = self.provider_id.sort_param(params)
-        string_to_hash = self.provider_id.generate_string_to_hash(params_sorted)
-        params['vpc_SecureHash'] = self.provider_id.generate_secure_hash(string_to_hash, self.provider_id.onepay_secret_key)
+        params_sorted = PaymentProviderOnePay.sort_param(params)
+        string_to_hash = PaymentProviderOnePay.generate_string_to_hash(params_sorted)
+        params['vpc_SecureHash'] = PaymentProviderOnePay.generate_secure_hash(string_to_hash, self.provider_id.onepay_secret_key)
 
         # Make the request to OnePay
         response = requests.post(
