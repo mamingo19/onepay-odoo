@@ -1,4 +1,4 @@
-data<odoo noupdate="1">
+<odoo noupdate="1">
     <record id="payment_method_onepay" model="payment.method">
         <field name="name">OnePay</field>
         <field name="code">onepay</field>
