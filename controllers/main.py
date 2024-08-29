@@ -13,6 +13,7 @@ from werkzeug.exceptions import Forbidden
 from odoo import _, http
 from odoo.exceptions import ValidationError
 from odoo.http import request
+from odoo.addons.onepay_payment.models.payment_provider import PaymentProviderOnePay
 
 _logger = logging.getLogger(__name__)
 
@@ -86,11 +87,11 @@ class OnePayController(http.Controller):
         
         merchant_hash_code = tx_sudo.provider_id.onepay_secret_key
 
-        sorted_data = OnePayController.sort_param(data)
-        signing_string = OnePayController.generate_string_to_hash(sorted_data)
+        sorted_data = PaymentProviderOnePay.sort_param(data)
+        signing_string = PaymentProviderOnePay.generate_string_to_hash(sorted_data)
 
         # Generate the expected signature
-        expected_signature = OnePayController.generate_secure_hash(signing_string, merchant_hash_code)
+        expected_signature = PaymentProviderOnePay.generate_secure_hash(signing_string, merchant_hash_code)
 
         # Log the received and expected signatures for debugging
         _logger.info("Received signature: %s", received_signature)
@@ -103,37 +104,6 @@ class OnePayController(http.Controller):
             _logger.warning("Received notification with invalid signature.")
             raise Forbidden()
         
-    @staticmethod
-    def sort_param(params):
-        return dict(sorted(params.items()))
-
-    @staticmethod
-    def generate_string_to_hash(params_sorted):
-        string_to_hash = ""
-        for key, value in params_sorted.items():
-            prefix_key = key[:4]
-            if prefix_key in ["vpc_", "user"]:
-                if key not in ["vpc_SecureHashType", "vpc_SecureHash"]:
-                    value_str = str(value)
-                    if value_str:
-                        if string_to_hash:
-                            string_to_hash += "&"
-                        string_to_hash += f"{key}={value_str}"
-        return string_to_hash
-
-    @staticmethod
-    def generate_secure_hash(string_to_hash: str, onepay_secret_key: str):
-        return OnePayController.vpc_auth(string_to_hash, onepay_secret_key)
-
-    @staticmethod
-    def vpc_auth(msg, key):
-        vpc_key = bytes.fromhex(key)
-        return OnePayController.hmac_sha256(vpc_key, msg).hex().upper()
-
-    @staticmethod
-    def hmac_sha256(key, msg):
-        return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
-
     @staticmethod
     def _get_error_message(response_code):
         error_messages = {
