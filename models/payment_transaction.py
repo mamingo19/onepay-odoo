@@ -119,42 +119,58 @@ class PaymentTransaction(models.Model):
         )
 
     def _cron_query_onepay_transaction_status(self):
-        fifteen_minutes_ago = fields.Datetime.now() - timedelta(minutes=1)
+        # Get the timestamp for one minute ago
+        fifteen_minutes_ago = fields.Datetime.now() - timedelta(minutes=15)
+        
+        # Search for pending OnePay transactions that haven't been queried yet
         transactions = self.search([
             ('provider_code', '=', 'onepay'),
             ('state', '=', 'pending'),
             ('onepay_query_status', '=', False),
             ('onepay_query_start_time', '>=', fifteen_minutes_ago),
         ])
+        
+        # Query the status of each transaction
         for tx in transactions:
             tx._query_onepay_transaction_status()
 
     def _query_onepay_transaction_status(self):
         self.ensure_one()
         
-        # Prepare the data for the POST request
+        # Define the maximum time to wait for a transaction to finalize (e.g., 15 minutes)
+        max_wait_time = timedelta(minutes=15)
+
+        # Check if the current time exceeds the maximum wait time
+        if fields.Datetime.now() > self.onepay_query_start_time + max_wait_time:
+            # Stop further queries and mark the transaction as timed out or failed
+            self._set_error("OnePay: Transaction timed out")
+            self.onepay_query_status = True
+            return
+        
+        # Prepare the data for the POST request to OnePay
         params = {
             'vpc_Command': 'queryDR',
             'vpc_Version': '2',
             'vpc_MerchTxnRef': self.reference,
             'vpc_Merchant': self.provider_id.onepay_merchant_id,
             'vpc_AccessCode': self.provider_id.onepay_access_code,
-            "vpc_Password": "admin@123456",
-            "vpc_User": "Administrator",  
+            "vpc_Password": "admin@123456",  # Hardcoded password (for testing purposes, should be securely managed)
+            "vpc_User": "Administrator",  # Hardcoded username (for testing purposes, should be securely managed)
         }
 
-        # Generate the secure hash
+        # Sort parameters and generate the secure hash for the request
         params_sorted = PaymentProviderOnePay.sort_param(params)
         string_to_hash = PaymentProviderOnePay.generate_string_to_hash(params_sorted)
         params['vpc_SecureHash'] = PaymentProviderOnePay.generate_secure_hash(string_to_hash, self.provider_id.onepay_secret_key)
 
-        # Make the request to OnePay
+        # Send the POST request to OnePay's API
         response = requests.post(
             "https://mtf.onepay.vn/msp/api/v1/vpc/invoices/queries",
             data=params,
             headers={'Content-Type': 'application/x-www-form-urlencoded'}
         )
 
+        # Process the response from OnePay
         if response.status_code == 200:
             response_data = response.json()
             response_code = response_data.get("vpc_TxnResponseCode")
@@ -166,15 +182,15 @@ class PaymentTransaction(models.Model):
                 error_message = self.provider_id._get_error_message(response_code)
                 self._set_error(f"OnePay: {error_message}")
 
-        # If the transaction is not finalized, schedule the next query
-        if fields.Datetime.now() < self.onepay_query_start_time + timedelta(minutes=1) and not self.onepay_query_status:
+        # Schedule another query if the transaction is still pending and within the allowed time
+        if fields.Datetime.now() < self.onepay_query_start_time + timedelta(minutes=15) and not self.onepay_query_status:
             self.env['ir.cron'].create({
                 'name': f'Query OnePay Transaction Status for {self.reference}',
                 'model_id': self.env.ref('payment.model_payment_transaction').id,
                 'state': 'code',
                 'code': f'model.browse({self.id})._query_onepay_transaction_status()',
-                'interval_number': 15,
-                'interval_type': 'seconds',
+                'interval_number': 5,
+                'interval_type': 'minutes',
                 'numbercall': 1,
-                'nextcall': fields.Datetime.now() + timedelta(seconds=15),
+                'nextcall': fields.Datetime.now() + timedelta(minutes=15),
             })
