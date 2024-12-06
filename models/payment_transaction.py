@@ -167,7 +167,7 @@ class PaymentTransaction(models.Model):
         response = requests.post(
             "https://mtf.onepay.vn/msp/api/v1/vpc/invoices/queries",
             data=params,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            header={'Content-Type': 'application/x-www-form-urlencoded'}
         )
 
         # Process the response from OnePay
